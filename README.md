@@ -318,18 +318,28 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 
 ## 未検証の項目
 
-以下は実機がないと確定できません。仕様書 §6.0 の一次情報と実機ログで
-確認してください。
+仕様書 §6.0 の一次情報と実機ログで確認します。
 
-- [ ] PSRAM 容量 (起動ログの `psram=` を見る)
+**実機で確認済み:**
+
+- [x] **PSRAM 4,188,007 bytes free** — 起動ログの `psram=` で確認
+- [x] **M5GFX の autodetect が `M5Paper` を正しく返す** — PlatformIO の
+      board 定義が `m5stack-fire` でも機種判別に影響しない
+- [x] **microSD の SPI ピン** — EPD とバスを共有し `SCK=14 / MISO=13 /
+      MOSI=12 / CS=4`。デフォルトの VSPI では通信できない
+- [x] **フォント欠如時のフォールバック** と `SD CONFIG ERROR` の異常系が
+      想定どおり動作
+- [x] **起床理由の判定** — リセット起動で `button (manual)` になる
+
+**未確認:**
+
 - [ ] `form` 文字列の向き — 末尾が最新かどうか。違っていたら
       `config.json` の `thresholds.form_latest_at_end` を `false` にする
 - [ ] API-FOOTBALL のフィールド名 (`src/api_football.cpp` のフィルタ)
 - [ ] `competitions.json` のリーグ ID
 - [ ] 毎分レート制限の実際の値 (**マイルストーン6で必ず計測**)
-- [ ] microSD の CS ピン (`src/storage.cpp` の `SD.begin`)
-- [ ] BM8563 のアラームレジスタ挙動と、電源ボタン起動時に AF が
-      立たないこと (決定事項2の前提)
+- [ ] BM8563 のアラームレジスタ挙動と、**RTC アラーム起動時に AF が
+      立つこと** (決定事項2の前提。ボタン起動時に立たないことは確認済み)
 - [ ] EPD モード名 (`m5gfx::epd_mode_t`) と部分書き換えの実測時間
 
 ---
