@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 #include <Preferences.h>
 #include <SD.h>
+#include <SPI.h>
 
 namespace fb {
 namespace storage {
@@ -15,16 +16,23 @@ bool g_nvs_ok = false;
 
 constexpr const char* kNvsNamespace = "fbboard";
 
+// M5Paper の microSD は IT8951 (EPD) と SPI バスを共有する。
+// デフォルトの VSPI ピン (18/19/23) ではカードに届かないので明示する。
+constexpr int kSdSck = 14;
+constexpr int kSdMiso = 13;
+constexpr int kSdMosi = 12;
+constexpr int kSdCs = 4;
+
 }  // namespace
 
 bool sd_ready() { return g_sd_ok; }
 
 bool begin_sd() {
-  // M5Paper の microSD は SPI。ピンは M5Unified が board 定義から解決する。
-  g_sd_ok = SD.begin(GPIO_NUM_4, SPI, 20000000);
+  SPI.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
+  g_sd_ok = SD.begin(kSdCs, SPI, 20000000);
   if (!g_sd_ok) {
     // 一度だけ低速で再試行する。相性の悪いカードがある。
-    g_sd_ok = SD.begin(GPIO_NUM_4, SPI, 4000000);
+    g_sd_ok = SD.begin(kSdCs, SPI, 4000000);
   }
   if (g_sd_ok) {
     ensure_dir("/cache");
