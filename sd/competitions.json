@@ -1,0 +1,118 @@
+{
+  "_comment": "順位帯の定義 (§4.1)。zones は配列の先頭から評価し、最初にマッチした帯を採用する。狭い帯を先に書くこと。negative=true は「入りたくない帯」で、文言が 転落 / 脱出 になる。",
+  "_league_id_comment": "league_id が 0 または未指定なら起動時に /leagues で解決する。既知の ID を入れてあるのでリクエストは発生しない。値は API-FOOTBALL の /leagues で必ず検証すること。",
+
+  "competitions": [
+    {
+      "key": "champions_league",
+      "display": "UEFA Champions League",
+      "league_id": 2,
+      "priority": 1,
+      "has_standings": true,
+      "is_cup": false,
+      "is_domestic": false,
+      "total_teams": 36,
+      "zones": [
+        { "name": "首位",   "from": 1,  "to": 1 },
+        { "name": "突破圏", "from": 1,  "to": 8 },
+        { "name": "PO圏",   "from": 9,  "to": 24 },
+        { "name": "敗退圏", "from": 25, "to": 36, "negative": true }
+      ]
+    },
+    {
+      "key": "europa_league",
+      "display": "UEFA Europa League",
+      "league_id": 3,
+      "priority": 2,
+      "has_standings": true,
+      "is_cup": false,
+      "is_domestic": false,
+      "total_teams": 36,
+      "zones": [
+        { "name": "首位",   "from": 1,  "to": 1 },
+        { "name": "突破圏", "from": 1,  "to": 8 },
+        { "name": "PO圏",   "from": 9,  "to": 24 },
+        { "name": "敗退圏", "from": 25, "to": 36, "negative": true }
+      ]
+    },
+    {
+      "key": "premier_league",
+      "display": "Premier League",
+      "league_id": 39,
+      "priority": 3,
+      "has_standings": true,
+      "is_cup": false,
+      "is_domestic": true,
+      "total_teams": 20,
+      "zones": [
+        { "name": "首位",   "from": 1,  "to": 1 },
+        { "name": "CL圏",   "from": 1,  "to": 5 },
+        { "name": "降格圏", "from": 18, "to": 20, "negative": true }
+      ]
+    },
+    {
+      "key": "bundesliga",
+      "display": "Bundesliga",
+      "league_id": 78,
+      "priority": 4,
+      "has_standings": true,
+      "is_cup": false,
+      "is_domestic": true,
+      "total_teams": 18,
+      "zones": [
+        { "name": "首位",   "from": 1,  "to": 1 },
+        { "name": "CL圏",   "from": 1,  "to": 4 },
+        { "name": "降格圏", "from": 17, "to": 18, "negative": true },
+        { "name": "入替戦", "from": 16, "to": 16, "negative": true }
+      ]
+    },
+    {
+      "key": "laliga",
+      "display": "LaLiga",
+      "league_id": 140,
+      "priority": 5,
+      "has_standings": true,
+      "is_cup": false,
+      "is_domestic": true,
+      "total_teams": 20,
+      "zones": [
+        { "name": "首位",   "from": 1,  "to": 1 },
+        { "name": "CL圏",   "from": 1,  "to": 5 },
+        { "name": "降格圏", "from": 18, "to": 20, "negative": true }
+      ]
+    },
+    {
+      "key": "fa_cup",
+      "display": "FA Cup",
+      "league_id": 45,
+      "priority": 6,
+      "has_standings": false,
+      "is_cup": true,
+      "is_domestic": true,
+      "total_teams": 0,
+      "zones": []
+    },
+    {
+      "key": "dfb_pokal",
+      "display": "DFB-Pokal",
+      "league_id": 81,
+      "priority": 7,
+      "has_standings": false,
+      "is_cup": true,
+      "is_domestic": true,
+      "total_teams": 0,
+      "zones": []
+    },
+    {
+      "key": "copa_del_rey",
+      "display": "Copa del Rey",
+      "league_id": 143,
+      "priority": 8,
+      "has_standings": false,
+      "is_cup": true,
+      "is_domestic": true,
+      "total_teams": 0,
+      "zones": []
+    }
+  ]
+}

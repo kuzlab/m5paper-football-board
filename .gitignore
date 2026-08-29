@@ -1,0 +1,17 @@
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+.DS_Store
+
+# 秘密情報 (§7.1) — config.example.json のみコミットする
+sd/config.json
+
+# 実行時に生成されるもの
+sd/cache/
+sd/logs/
+
+# フォント成果物は配布しない (§7.3 / tools/make_vlw.py で生成する)
+*.vlw
+tools/.venv/
+tools/fonts_src/

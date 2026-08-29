@@ -1,0 +1,34 @@
+{
+  "_comment": "このファイルを config.json にリネームして microSD 直下に置く。config.json は絶対にコミットしないこと (§7.1)",
+
+  "wifi_ssid": "YOUR_SSID",
+  "wifi_password": "YOUR_PASSWORD",
+  "apisports_key": "YOUR_API_SPORTS_KEY",
+
+  "daily_wake_local": "07:00",
+  "tz_offset_min": 540,
+
+  "min_refresh_sec": 600,
+  "fetch_window_hours": 72,
+  "low_battery_volt": 3.30,
+  "max_consecutive_failures": 5,
+  "log_retention_days": 14,
+
+  "_budget_comment": "無料プランは 100 req/日 かつ 10 req/分。auto_reserve_requests は翌朝の自動更新のために取り置く分",
+  "max_requests_per_day": 90,
+  "auto_reserve_requests": 13,
+  "max_fetch_per_day": 5,
+  "max_requests_per_wake": 20,
+  "max_requests_per_minute": 10,
+
+  "thresholds": {
+    "win_streak_min": 2,
+    "loss_streak_min": 2,
+    "unbeaten_min": 5,
+    "big_win_diff": 4,
+    "upset_rank_gap": 8,
+    "rank_change_min": 2,
+    "_form_comment": "form 文字列の末尾が最新かどうか。実データで必ず確認する (§4.3)",
+    "form_latest_at_end": true
+  }
+}

@@ -1,0 +1,72 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: native unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      - name: Run unit tests
+        run: pio test -e native
+
+  build:
+    name: firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      - name: Build firmware
+        run: pio run -e m5paper
+
+  secrets:
+    name: no secrets committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: config.json must not be committed
+        run: |
+          if git ls-files --error-unmatch sd/config.json >/dev/null 2>&1; then
+            echo "::error::sd/config.json is tracked. It contains Wi-Fi and API credentials."
+            exit 1
+          fi
+          echo "ok: sd/config.json is not tracked"
+      - name: no font binaries committed
+        run: |
+          if git ls-files '*.vlw' | grep -q .; then
+            echo "::error::VLW font binaries must not be committed"
+            exit 1
+          fi
+          echo "ok: no .vlw tracked"
+      - name: no obvious credentials in source
+        run: |
+          # 実行時に SD から読む設計なので、ソースに鍵が現れてはいけない (§7.1)
+          if grep -rInE 'apisports_key[[:space:]]*=[[:space:]]*"[A-Za-z0-9]{16,}"' src/ ; then
+            echo "::error::hard-coded API key found in src/"
+            exit 1
+          fi
+          if grep -rInE 'wifi_password[[:space:]]*=[[:space:]]*"[^"]+"' src/ ; then
+            echo "::error::hard-coded Wi-Fi password found in src/"
+            exit 1
+          fi
+          echo "ok: no hard-coded credentials in src/"
