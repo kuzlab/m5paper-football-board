@@ -7,6 +7,9 @@
 # 秘密情報 (§7.1) — config.example.json のみコミットする
 sd/config.json
 
+# TLS ルート証明書は各自が tools/fetch_ca.sh で取得する (期限切れするため)
+sd/ca.pem
+
 # 実行時に生成されるもの
 sd/cache/
 sd/logs/

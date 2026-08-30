@@ -71,13 +71,33 @@ TLS 接続に失敗するようになったら、証明書が更新された可�
 
 ### 3. 日本語フォントを作る
 
-SIL OFL のフォント (Noto Sans JP など) を用意して、必要な文字だけに絞った
-VLW を生成します。
+SIL OFL のフォントを用意して、必要な文字だけに絞った VLW を生成します。
+
+> **日本語フォント1本では足りません。** Noto Sans JP は Latin Extended-A を
+> **98文字欠いており** (`ş` `č` `ğ` `ı` など)、`Beşiktaş` や `Crvena zvezda`
+> が欠字します。`--font` を複数指定すると、先頭のフォントを優先しつつ
+> グリフを持たない文字を後続のフォントから補います。
 
 ```bash
-pip install freetype-py
-python3 tools/make_vlw.py --font ~/fonts/NotoSansJP-Regular.ttf --out sd/fonts
+pip install freetype-py     # pip が失敗する場合は --index-url https://pypi.org/simple
+
+curl -fsSLO "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf"
+curl -fsSLO "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf"
+
+python3 tools/make_vlw.py \
+  --font "NotoSansJP[wght].ttf" \
+  --font "NotoSans[wdth,wght].ttf" \
+  --out sd/fonts --strict
 ```
+
+```
+charset: 391 glyphs
+  wrote sd/fonts/board_20.vlw: 391 glyphs (98 from fallback fonts),  82 KB
+  wrote sd/fonts/board_28.vlw: 391 glyphs (98 from fallback fonts), 144 KB
+```
+
+`--strict` は1文字でも欠けたら失敗します。欠字したまま気づかず焼くのを防ぐため、
+**常に付けることを推奨します。**
 
 収録される文字:
 
@@ -93,7 +113,17 @@ python3 tools/make_vlw.py --font ~/fonts/NotoSansJP-Regular.ttf --out sd/fonts
 Latin Extended-A の外側 (キリル文字など) は `fold_unsupported()` が `?` や
 ASCII 近似に畳みます。豆腐や描画崩れにはなりません。
 
-### 4. 書き込む
+### 4. microSD に配置する
+
+```bash
+./tools/prepare_sd.sh /Volumes/<カード名>      # 引数なしで実行すると候補を一覧表示
+diskutil unmount /Volumes/<カード名>
+```
+
+必要なファイルが揃っているかを確認してからコピーします。揃っていなければ
+不足分と、その作り方を表示します。
+
+### 5. 書き込む
 
 ```bash
 pio run -e m5paper -t upload

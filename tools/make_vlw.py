@@ -13,9 +13,18 @@ M5GFX の loadFont() が読む VLW 形式を、必要な文字だけに絞って
 src/core/messages.cpp のテンプレートを変更したら、このスクリプトを
 必ず再実行すること。文字リストは messages.cpp から自動抽出する。
 
+日本語フォントは Latin Extended-A を持っていないことが多い (Noto Sans JP は
+98文字欠けている)。--font は複数指定でき、先に書いたフォントを優先しつつ、
+グリフを持たない文字は後続のフォントから補う。
+
 使い方:
-    pip install fonttools freetype-py
-    python3 tools/make_vlw.py --font NotoSansJP-Regular.ttf --out sd/fonts
+    pip install freetype-py
+    python3 tools/make_vlw.py \
+        --font NotoSansJP[wght].ttf \
+        --font NotoSans[wdth,wght].ttf \
+        --out sd/fonts
+
+--strict を付けると、1文字でも欠けた時点で失敗する (CI 向け)。
 """
 
 import argparse
@@ -72,19 +81,33 @@ def build_charset(src_dir):
 #   末尾: フォント名 (ASCII, 長さ int32 BE + 文字列) — M5GFX は読み飛ばす
 
 
-def render_glyphs(font_path, size, chars):
+def render_glyphs(font_paths, size, chars):
+    """先頭のフォントを優先し、グリフが無い文字は後続のフォントで補う。"""
     import freetype
 
-    face = freetype.Face(font_path)
-    face.set_pixel_sizes(0, size)
-    ascent = face.size.ascender >> 6
-    descent = -(face.size.descender >> 6)
+    faces = []
+    for path in font_paths:
+        face = freetype.Face(path)
+        face.set_pixel_sizes(0, size)
+        faces.append(face)
+
+    # 縦方向のメトリクスは主フォントに合わせる
+    primary = faces[0]
+    ascent = primary.size.ascender >> 6
+    descent = -(primary.size.descender >> 6)
 
     glyphs = []
     missing = []
+    from_fallback = 0
     for ch in chars:
-        idx = face.get_char_index(ord(ch))
-        if idx == 0:
+        face = None
+        for i, f in enumerate(faces):
+            if f.get_char_index(ord(ch)) != 0:
+                face = f
+                if i > 0:
+                    from_fallback += 1
+                break
+        if face is None:
             missing.append(ch)
             continue
         face.load_char(ch, freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL)
@@ -102,7 +125,7 @@ def render_glyphs(font_path, size, chars):
                 "bitmap": data,
             }
         )
-    return glyphs, ascent, descent, missing
+    return glyphs, ascent, descent, missing, from_fallback
 
 
 def write_vlw(path, glyphs, size, ascent, descent, name="subset"):
@@ -130,27 +153,38 @@ def write_vlw(path, glyphs, size, ascent, descent, name="subset"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--font", required=True, help="SIL OFL の TTF/OTF")
+    ap.add_argument("--font", required=True, action="append",
+                    help="SIL OFL の TTF/OTF。複数指定可、先勝ち")
     ap.add_argument("--out", default="sd/fonts")
     ap.add_argument("--sizes", default="20,28")
     ap.add_argument("--src", default="src", help="messages.cpp のあるディレクトリ")
     ap.add_argument("--name", default="board")
+    ap.add_argument("--strict", action="store_true",
+                    help="1文字でも欠けたら失敗する")
     args = ap.parse_args()
 
     chars = build_charset(args.src)
     print(f"charset: {len(chars)} glyphs")
 
     os.makedirs(args.out, exist_ok=True)
+    failed = False
     for size in [int(s) for s in args.sizes.split(",")]:
-        glyphs, ascent, descent, missing = render_glyphs(args.font, size, chars)
+        glyphs, ascent, descent, missing, fallback_n = render_glyphs(
+            args.font, size, chars)
         if missing:
-            # 収録できなかった文字は fold_unsupported() で '?' になる。
-            print(f"  WARNING: {len(missing)} chars missing from the font: "
-                  f"{''.join(missing[:40])}", file=sys.stderr)
+            # ここに残った文字は実機で欠字する。src/core/text_util.cpp の
+            # is_supported_codepoint() と食い違っていないか確認すること。
+            print(f"  ERROR: {len(missing)} chars not found in any font: "
+                  f"{''.join(missing)}", file=sys.stderr)
+            failed = True
         out = os.path.join(args.out, f"{args.name}_{size}.vlw")
         write_vlw(out, glyphs, size, ascent, descent, f"{args.name}{size}")
-        print(f"  wrote {out}: {len(glyphs)} glyphs, "
+        print(f"  wrote {out}: {len(glyphs)} glyphs "
+              f"({fallback_n} from fallback fonts), "
               f"{os.path.getsize(out)/1024:.0f} KB")
+
+    if failed and args.strict:
+        sys.exit(1)
 
     print("\nライセンス: SIL OFL のフォントを使い、OFL 全文を sd/fonts/OFL.txt "
           "として同梱すること。派生フォントのファイル名に元の書体名をそのまま "
