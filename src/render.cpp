@@ -190,41 +190,29 @@ bool needs_ghost_clear() {
   return storage::partial_refresh_count() >= kMaxPartialBeforeFull;
 }
 
-void draw_status_bar(const StatusBar& sb) {
-  // 部分書き換え。押されてから1秒以内に「更新中…」を出すため (§6.3)。
+void draw_body(const RenderPlan& plan);  // 下で定義
+
+void draw_status_bar(const StatusBar& sb, const RenderPlan& body) {
+  // 電源ラッチ方式では起床がコールドブートで、EPD のフレームバッファ (RAM)
+  // が空で始まる。パネルには前回の絵が残っているが RAM には無い (§6.2-1)。
   //
-  // 電源ラッチ方式では起床がコールドブートなので、EPD のフレームバッファ
-  // (RAM) は真っ白で始まる。パネルには前回の絵が残っているが RAM には無い。
-  // ここで display() を引数なしで呼ぶとフレームバッファ全体が押し出され、
-  // 固定エリア以外が白で塗り潰されて試合一覧が消える (§6.2-1)。
-  // 押し出す領域を固定エリアだけに限定すること。
+  // そのため「固定エリアだけ描いて押し出す」ことができない。領域を限定して
+  // 押しても、パネル側の該当外領域を保てる保証がなく、実機では試合一覧が
+  // 消えた。コールドブートの前提に合わせ、毎回フレームバッファ全体を
+  // 組み立て直してから押し出す。本文は前回描いた内容を SD から復元する。
   M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_fast);
+  M5.Display.fillScreen(TFT_WHITE);
+  draw_body(body);
   draw_status_contents(sb);
-  M5.Display.display(0, 0, g_lm.screen_w, kStatusH);
+  M5.Display.display();
   storage::set_partial_refresh_count(storage::partial_refresh_count() + 1);
 }
 
-void draw_full(const RenderPlan& plan, const StatusBar& sb) {
+void draw_body(const RenderPlan& plan) {
   const LayoutMetrics lm = metrics();
-  M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_quality);
-
-  // 白フラッシュ。部分書き換えを重ねた後の面は中間調が残っており、
-  // 白で塗るだけでは真っ白に戻らない (背景がグレーに見える原因)。
-  // 一度黒で塗ってパネルの全画素を駆動する。
-  //
-  // 押し出しはこの1回と、内容を描き切った後の1回だけにする。
-  // 白で塗って押してから内容を描くと、その間に電源が落ちた場合に
-  // 白紙のまま残ってしまう。§8.1 の「前回の画面をそのまま残す」に反する。
-  M5.Display.fillScreen(TFT_BLACK);
-  M5.Display.display();
-
-  M5.Display.fillScreen(TFT_WHITE);
-  draw_status_contents(sb);
-
-  // 28px の要素をまとめて描く。フォントの入れ替えを2回に抑えるため
-  // カラムごとではなくフォントごとに描く。
-  use_font28();
   M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+
+  use_font28();
   M5.Display.setTextDatum(top_left);
   const int text_h = M5.Display.fontHeight();
   for (const auto& r : plan.rows) {
@@ -248,7 +236,6 @@ void draw_full(const RenderPlan& plan, const StatusBar& sb) {
     }
   }
 
-  // 20px の要素 (ファクトと溢れ表示)
   use_font20();
   // 20px の行は 28px の行の中心に合わせる。上揃えだと浮いて見える。
   const int fact_offset = (lm.row_h - M5.Display.fontHeight()) / 2;
@@ -266,7 +253,23 @@ void draw_full(const RenderPlan& plan, const StatusBar& sb) {
                           plan.overflow_y + 4);
     M5.Display.setTextDatum(top_left);
   }
+}
 
+void draw_full(const RenderPlan& plan, const StatusBar& sb) {
+  M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_quality);
+
+  // 黒フラッシュ。部分書き換えを重ねた後の面は中間調が残っており、
+  // 白で塗るだけでは真っ白に戻らない (背景がグレーに見える原因)。
+  // 一度黒で塗ってパネルの全画素を駆動する。
+  M5.Display.fillScreen(TFT_BLACK);
+  M5.Display.display();
+
+  // 押し出しは内容を描き切ってから1回だけ。白で押してから描くと、
+  // その間に電源が落ちた場合に白紙が残り、§8.1 の「前回の画面をそのまま
+  // 残す」に反する。
+  M5.Display.fillScreen(TFT_WHITE);
+  draw_body(plan);
+  draw_status_contents(sb);
   M5.Display.display();
   storage::set_partial_refresh_count(0);  // 全面書き換えでゴーストが消えた
 }

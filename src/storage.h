@@ -8,6 +8,7 @@
 
 #include "core/config_parse.h"
 #include "core/model.h"
+#include "core/selector.h"
 
 namespace fb {
 namespace storage {
@@ -17,6 +18,7 @@ constexpr const char* kConfigPath       = "/config.json";
 constexpr const char* kCompetitionsPath = "/competitions.json";
 constexpr const char* kStandingsPath    = "/cache/standings_prev.json";
 constexpr const char* kSeenPath         = "/cache/seen_fixtures.json";
+constexpr const char* kPlanPath         = "/cache/last_plan.json";
 constexpr const char* kLogDir           = "/logs";
 constexpr const char* kFont28Path       = "/fonts/board_28.vlw";
 constexpr const char* kFont20Path       = "/fonts/board_20.vlw";
@@ -46,6 +48,12 @@ bool load_standings(const std::vector<Competition>& comps,
                     std::vector<LeagueStandings>& out);
 bool save_standings(const std::vector<LeagueStandings>& in,
                     const std::vector<Competition>& comps);
+
+// --- 前回描画した画面 (§6.2-1) ------------------------------------------
+// 電源ラッチ方式ではコールドブートなので EPD のフレームバッファが空で
+// 始まる。パネルの絵を再現するには、前回描いた内容を持ち越すしかない。
+bool load_plan(RenderPlan& out);
+bool save_plan(const RenderPlan& in);
 
 // --- 既出 fixture (再掲の優先度下げ用、§2.2 の72時間ウィンドウ) ---------
 bool load_seen_fixtures(std::vector<long>& out);

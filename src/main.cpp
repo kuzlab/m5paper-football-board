@@ -31,6 +31,9 @@ namespace {
 AppConfig g_cfg;
 std::vector<Competition> g_comps;
 render::StatusBar g_bar;
+// 前回描いた画面。コールドブートでフレームバッファが空になるため、
+// 固定エリアだけを更新する場合もこれを描き直す必要がある (§6.2-1)。
+RenderPlan g_last_plan;
 std::string g_ca_pem;
 unsigned long g_t0 = 0;
 
@@ -240,16 +243,22 @@ void setup() {
   g_bar.font_error = !fonts;
 
   const std::time_t last_ok = storage::last_success_utc();
+  // 前回の画面を SD から復元する。無ければ本文なしで進む (初回)。
+  // コールドブートではフレームバッファが空なので、これが無いと
+  // 固定エリアを更新しただけで本文が消える (§6.2-1)。
+  const bool plan_restored = storage::load_plan(g_last_plan);
+  LOGI("last plan: %s (%d rows)", plan_restored ? "restored" : "none",
+       (int)g_last_plan.rows.size());
   g_bar.left = std::string(msg::kUpdating);
-  // 押されたら通信前に「更新中…」を出す (§6.3)。
-  render::draw_status_bar(g_bar);
+  // 押されたら通信前に「Updating...」を出す (§6.3)。
+  render::draw_status_bar(g_bar, g_last_plan);
 
   // --- 電池チェック ------------------------------------------------------
   const float vbat = power::battery_volt();
   if (vbat > 0.1f && vbat < g_cfg.low_battery_volt) {
     LOGW("battery low: %.2fV -> skip fetch", vbat);
     g_bar.left = std::string(msg::kLowBattery);
-    render::draw_status_bar(g_bar);
+    render::draw_status_bar(g_bar, g_last_plan);
     finish_and_power_off(now > 0 ? now : rtc_now_utc());
   }
 
@@ -262,7 +271,7 @@ void setup() {
     LOGI("cooldown: %lds since last fetch", (long)(now - last_fetch));
     g_bar.left = std::string(msg::kAlreadyFresh) + "  " +
                  local_hhmm(last_ok, g_cfg.tz_offset_min);
-    render::draw_status_bar(g_bar);
+    render::draw_status_bar(g_bar, g_last_plan);
     finish_and_power_off(now);
   }
 
@@ -272,7 +281,7 @@ void setup() {
     storage::set_consecutive_failures(storage::consecutive_failures() + 1);
     g_bar.left = std::string(msg::kFailedPrefix) + " " +
                  local_hhmm(last_ok, g_cfg.tz_offset_min);
-    render::draw_status_bar(g_bar);
+    render::draw_status_bar(g_bar, g_last_plan);
     finish_and_power_off(now > 0 ? now : rtc_now_utc());
   }
   const std::time_t synced = sync_time();
@@ -365,7 +374,7 @@ void setup() {
       g_bar.left = std::string(msg::kFailedPrefix) + " " +
                    local_hhmm(last_ok, g_cfg.tz_offset_min);
     }
-    render::draw_status_bar(g_bar);
+    render::draw_status_bar(g_bar, g_last_plan);
     finish_and_power_off(now);
   }
 
@@ -411,7 +420,7 @@ void setup() {
     LOGI("content unchanged -> status bar only");
     g_bar.left = std::string(msg::kUpdatedPrefix) + " " +
                  local_hhmm(now, g_cfg.tz_offset_min);
-    render::draw_status_bar(g_bar);
+    render::draw_status_bar(g_bar, plan);
   } else {
     LOGI("render full: %d rows, %d overflow, %d facts",
          (int)plan.rows.size(), plan.overflow_count, with_fact);
@@ -419,6 +428,8 @@ void setup() {
                  local_hhmm(now, g_cfg.tz_offset_min);
     render::draw_full(plan, g_bar);
     storage::set_last_plan_hash(hash);
+    // 次回のコールドブートで画面を再構成できるよう保存する (§6.2-1)。
+    storage::save_plan(plan);
   }
 
   // --- 保存 --------------------------------------------------------------

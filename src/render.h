@@ -34,8 +34,10 @@ Measures measures();
 // 固定値にすると、フォントを差し替えたときに文字が罫線を貫く。
 LayoutMetrics metrics();
 
-// 固定エリアだけを部分書き換え (§5.5)。1秒以内に反映される。
-void draw_status_bar(const StatusBar& sb);
+// 固定エリアだけを更新する。ただしコールドブートでフレームバッファが
+// 空になるため、本文 (前回描いた内容) も一緒に描き直してから押し出す。
+// body には storage::load_plan() で復元したものを渡す (§6.2-1)。
+void draw_status_bar(const StatusBar& sb, const RenderPlan& body);
 
 // 全面書き換え。ゴーストを消すために内容変更時に使う。
 void draw_full(const RenderPlan& plan, const StatusBar& sb);

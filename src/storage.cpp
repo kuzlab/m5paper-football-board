@@ -143,6 +143,69 @@ bool save_standings(const std::vector<LeagueStandings>& in,
                            serialize_standings_cache(in, comps));
 }
 
+// --- 前回描画した画面 ---
+
+bool load_plan(RenderPlan& out) {
+  out.rows.clear();
+  out.overflow_count = 0;
+  out.overflow_y = 0;
+  std::string json;
+  if (!read_file(kPlanPath, json, 16384)) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json)) return false;
+  out.overflow_count = doc["ofc"] | 0;
+  out.overflow_y = doc["ofy"] | 0;
+  for (JsonArrayConst r : doc["rows"].as<JsonArrayConst>()) {
+    // ["H", y, heading] または ["M", y, home, score, away, fact]
+    if (r.size() < 3) continue;
+    const char* kind = r[0];
+    if (!kind) continue;
+    PlanRow row;
+    row.kind = (kind[0] == 'H') ? PlanRow::kHeading : PlanRow::kMatch;
+    row.y = r[1] | 0;
+    auto str = [](JsonVariantConst v) {
+      const char* s = v.as<const char*>();
+      return std::string(s ? s : "");
+    };
+    if (row.kind == PlanRow::kHeading) {
+      row.heading = str(r[2]);
+    } else {
+      if (r.size() < 6) continue;
+      row.home = str(r[2]);
+      row.score = str(r[3]);
+      row.away = str(r[4]);
+      row.fact = str(r[5]);
+    }
+    out.rows.push_back(row);
+  }
+  return !out.rows.empty();
+}
+
+bool save_plan(const RenderPlan& in) {
+  JsonDocument doc;
+  doc["ofc"] = in.overflow_count;
+  doc["ofy"] = in.overflow_y;
+  JsonArray rows = doc["rows"].to<JsonArray>();
+  for (const auto& r : in.rows) {
+    JsonArray a = rows.add<JsonArray>();
+    if (r.kind == PlanRow::kHeading) {
+      a.add("H");
+      a.add(r.y);
+      a.add(r.heading);
+    } else {
+      a.add("M");
+      a.add(r.y);
+      a.add(r.home);
+      a.add(r.score);
+      a.add(r.away);
+      a.add(r.fact);
+    }
+  }
+  std::string out;
+  serializeJson(doc, out);
+  return write_file_atomic(kPlanPath, out);
+}
+
 // --- 既出 fixture -------------------------------------------------------
 
 bool load_seen_fixtures(std::vector<long>& out) {
