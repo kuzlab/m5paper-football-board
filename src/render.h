@@ -30,6 +30,10 @@ bool fonts_ok();
 // 幅の実測。build_plan に渡す (§5.3)。
 Measures measures();
 
+// フォントの実測値から行高を決めたレイアウト。
+// 固定値にすると、フォントを差し替えたときに文字が罫線を貫く。
+LayoutMetrics metrics();
+
 // 固定エリアだけを部分書き換え (§5.5)。1秒以内に反映される。
 void draw_status_bar(const StatusBar& sb);
 

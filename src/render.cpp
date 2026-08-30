@@ -118,6 +118,10 @@ bool begin() {
   }
   M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_quality);
   M5.Display.setTextWrap(false);
+  // 色深度は中間調の出方に直結する。グレー背景やコントラスト不足の
+  // 切り分けに要るので実機の値をログに残す (§6.0)。
+  LOGI("display: %dx%d, colorDepth=%d bpp", g_lm.screen_w, g_lm.screen_h,
+       (int)M5.Display.getColorDepth());
   return true;
 }
 
@@ -170,6 +174,18 @@ Measures measures() {
   return m;
 }
 
+LayoutMetrics metrics() {
+  LayoutMetrics lm = g_lm;
+  // VLW の行高は指定サイズより大きい (28px 指定で ascent33+descent9=42px)。
+  // 実測値から行高を決めないと、文字が下の行や罫線を貫く。
+  const int h28 = g_fonts_ok ? g_metric28.fontHeight() : 28;
+  const int h20 = g_fonts_ok ? g_metric20.fontHeight() : 20;
+  lm.row_h = h28 + 6;
+  lm.heading_h = h28 + 14;   // 罫線を引く余白を下に確保する
+  lm.overflow_h = h20 + 6;
+  return lm;
+}
+
 bool needs_ghost_clear() {
   return storage::partial_refresh_count() >= kMaxPartialBeforeFull;
 }
@@ -183,8 +199,17 @@ void draw_status_bar(const StatusBar& sb) {
 }
 
 void draw_full(const RenderPlan& plan, const StatusBar& sb) {
+  const LayoutMetrics lm = metrics();
   M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_quality);
+
+  // 白フラッシュ。部分書き換えを重ねた後の面は中間調が残っており、
+  // 白で塗るだけでは真っ白に戻らない (背景がグレーに見える原因)。
+  // 一度黒で塗ってから白に戻すと、パネルが全画素を駆動して素の白になる。
+  M5.Display.fillScreen(TFT_BLACK);
+  M5.Display.display();
   M5.Display.fillScreen(TFT_WHITE);
+  M5.Display.display();
+
   draw_status_contents(sb);
 
   // 28px の要素をまとめて描く。フォントの入れ替えを2回に抑えるため
@@ -192,14 +217,18 @@ void draw_full(const RenderPlan& plan, const StatusBar& sb) {
   use_font28();
   M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
   M5.Display.setTextDatum(top_left);
+  const int text_h = M5.Display.fontHeight();
   for (const auto& r : plan.rows) {
     if (r.kind == PlanRow::kHeading) {
-      M5.Display.fillRect(g_lm.heading_x, r.y + 12, 8, 16, TFT_BLACK);
-      M5.Display.drawString(r.heading.c_str(), g_lm.heading_x + 18, r.y + 6);
-      M5.Display.drawFastHLine(g_lm.heading_x, r.y + g_lm.heading_h - 4,
+      // 罫線は文字の下端より下に引く。行高を実測しないとここが重なる。
+      const int rule_y = r.y + text_h + 6;
+      M5.Display.fillRect(g_lm.heading_x, r.y + text_h / 2 - 6, 8, 14,
+                          TFT_BLACK);
+      M5.Display.drawString(r.heading.c_str(), g_lm.heading_x + 18, r.y);
+      M5.Display.drawFastHLine(g_lm.heading_x, rule_y,
                                g_lm.screen_w - g_lm.heading_x * 2, TFT_BLACK);
     } else {
-      const int ty = r.y + 6;
+      const int ty = r.y + 3;
       M5.Display.setTextDatum(top_left);
       M5.Display.drawString(r.home.c_str(), g_lm.col_home_x, ty);
       M5.Display.setTextDatum(top_center);
@@ -212,12 +241,14 @@ void draw_full(const RenderPlan& plan, const StatusBar& sb) {
 
   // 20px の要素 (ファクトと溢れ表示)
   use_font20();
+  // 20px の行は 28px の行の中心に合わせる。上揃えだと浮いて見える。
+  const int fact_offset = (lm.row_h - M5.Display.fontHeight()) / 2;
   M5.Display.setTextDatum(top_left);
   for (const auto& r : plan.rows) {
     if (r.kind != PlanRow::kMatch) continue;
     const std::string t = safe_text(r.fact);
     if (t.empty()) continue;  // ファクトが無ければ何も書かない (§4.2)
-    M5.Display.drawString(t.c_str(), g_lm.col_fact_x, r.y + 10);
+    M5.Display.drawString(t.c_str(), g_lm.col_fact_x, r.y + fact_offset);
   }
   if (plan.has_overflow()) {
     M5.Display.setTextDatum(top_right);

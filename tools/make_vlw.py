@@ -79,13 +79,38 @@ def build_charset(src_dir):
 #   末尾: フォント名 (ASCII, 長さ int32 BE + 文字列) — M5GFX は読み飛ばす
 
 
-def render_glyphs(font_paths, size, chars):
+def set_weight(face, weight):
+    """可変フォントなら wght 軸を指定の太さに合わせる。
+
+    e-paper はコントラストが出にくく、Regular (400) だと線が細くて読みづらい。
+    SemiBold 前後まで太らせると実機での可読性が大きく変わる。
+    可変フォントでなければ何もしない。
+    """
+    if not weight:
+        return
+    try:
+        info = face.get_variation_info()
+    except Exception:
+        return  # 可変フォントではない
+    coords = []
+    for axis in info.axes:
+        tag = axis.tag.decode() if isinstance(axis.tag, bytes) else str(axis.tag)
+        if tag == "wght":
+            coords.append(max(axis.minimum, min(axis.maximum, weight * 65536)))
+        else:
+            coords.append(axis.default)
+    if coords:
+        face.set_var_design_coords(coords)
+
+
+def render_glyphs(font_paths, size, chars, weight=0):
     """先頭のフォントを優先し、グリフが無い文字は後続のフォントで補う。"""
     import freetype
 
     faces = []
     for path in font_paths:
         face = freetype.Face(path)
+        set_weight(face, weight)
         face.set_pixel_sizes(0, size)
         faces.append(face)
 
@@ -159,16 +184,19 @@ def main():
     ap.add_argument("--name", default="board")
     ap.add_argument("--strict", action="store_true",
                     help="1文字でも欠けたら失敗する")
+    ap.add_argument("--weight", type=int, default=600,
+                    help="可変フォントの wght 軸 (既定 600 = SemiBold)。"
+                         "e-paper では Regular だと細くて読みづらい")
     args = ap.parse_args()
 
     chars = build_charset(args.src)
-    print(f"charset: {len(chars)} glyphs")
+    print(f"charset: {len(chars)} glyphs, weight={args.weight}")
 
     os.makedirs(args.out, exist_ok=True)
     failed = False
     for size in [int(s) for s in args.sizes.split(",")]:
         glyphs, ascent, descent, missing, fallback_n = render_glyphs(
-            args.font, size, chars)
+            args.font, size, chars, args.weight)
         if missing:
             # ここに残った文字は実機で欠字する。src/core/text_util.cpp の
             # is_supported_codepoint() と食い違っていないか確認すること。

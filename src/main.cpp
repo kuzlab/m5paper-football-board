@@ -400,8 +400,9 @@ void setup() {
     if (e.fact.valid()) ++with_fact;
   }
 
+  // レイアウトはフォントの実測値から決める (固定値だと文字が罫線を貫く)。
   const RenderPlan plan =
-      build_plan(entries, g_comps, LayoutMetrics(), render::measures());
+      build_plan(entries, g_comps, render::metrics(), render::measures());
   const std::uint32_t hash = plan_hash(plan);
 
   // --- 描画 (§5.5) -------------------------------------------------------
