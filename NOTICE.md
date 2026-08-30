@@ -3,19 +3,22 @@
 このリポジトリのコードは MIT ライセンス (`LICENSE`) です。以下は同梱・依存する
 第三者の成果物と、公開前に確認が必要な事項です。
 
-## API-FOOTBALL (API-SPORTS)
+## football-data.org
 
-試合結果と順位表は [API-FOOTBALL](https://www.api-football.com/) から取得します。
+試合結果と順位表は [football-data.org](https://www.football-data.org/) の
+v4 API から取得します。
 
 > **公開前に必ず利用規約を読むこと。**
-> 無料プランには帰属表示 (attribution) の条件が付く場合があります。表示が
-> 必要な場合、固定エリアまたは README に指定された文言を入れる必要があります。
-> 本リポジトリはその判断を行っていません。利用者の責任で確認してください。
+> 帰属表示 (attribution) の要否は利用者の責任で確認してください。本リポジトリは
+> その判断を行っていません。
 
-- 規約: https://www.api-football.com/terms
-- ダッシュボード: https://dashboard.api-football.com/
+- 規約: https://www.football-data.org/terms
+- 登録: https://www.football-data.org/client/register
 
-API キーは microSD の `config.json` から実行時に読み込みます。ファームウェアや
+無料枠は12コンペティション、10リクエスト/分、日次上限なし、現行シーズン限定です。
+本プロジェクトが対象とする4競技 (CL / PL / BL1 / PD) はこの枠に含まれます。
+
+API トークンは microSD の `config.json` から実行時に読み込みます。ファームウェアや
 リポジトリには含まれません (SPEC §7.1)。
 
 ## フォント

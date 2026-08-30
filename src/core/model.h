@@ -24,7 +24,7 @@ struct Zone {
 struct Competition {
   std::string key;      // "premier_league" — competitions.json のキー
   std::string display;  // "Premier League" — 画面表示名 (原語のまま、§5.1)
-  int league_id = 0;    // API-FOOTBALL の league id
+  std::string code;     // football-data.org の競技会コード ("PL" 等)。URL に直接使う
   int priority = 99;    // 1 が最優先。溢れ時の切り捨て順 (§5.2)
   bool has_standings = false;
   bool is_cup = false;
@@ -47,7 +47,7 @@ struct Match {
   long fixture_id = 0;
   int comp_index = -1;  // Competition 配列への添字
   std::time_t kickoff_utc = 0;
-  std::string status;  // "FT" / "AET" / "PEN"
+  std::string status;  // football-data.org: "FINISHED" / "AWARDED"
   int home_id = 0;
   int away_id = 0;
   std::string home_name;
@@ -56,7 +56,9 @@ struct Match {
   int away_goals = -1;
 
   bool finished() const {
-    return status == "FT" || status == "AET" || status == "PEN";
+    // football-data.org のステータス。?status=FINISHED で問い合わせるので
+    // 通常 FINISHED しか来ないが、没収試合の AWARDED も結果として扱う。
+    return status == "FINISHED" || status == "AWARDED";
   }
   bool has_score() const { return home_goals >= 0 && away_goals >= 0; }
   // 0 = 引き分け, 1 = ホーム勝ち, -1 = アウェイ勝ち
@@ -76,11 +78,13 @@ struct Match {
 // --- 順位表 (§2.5) ------------------------------------------------------
 struct StandingRow {
   int team_id = 0;
-  std::string team_name;
-  int rank = 0;
-  std::string form;  // "WWLDW"
+  std::string team_name;  // shortName 優先、無ければ name (§3.2)
+  int rank = 0;           // football-data.org の "position"
   int points = 0;
-  int played = 0;
+  int played = 0;         // "playedGames"
+  // 参考値。無料枠では空のことがあるので判定には使わない (§2.4)。
+  // 連勝・連敗は FormTable が試合一覧から自前で算出する。
+  std::string api_form;
 };
 
 struct LeagueStandings {

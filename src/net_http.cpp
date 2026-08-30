@@ -174,7 +174,7 @@ bool KeepAliveClient::connected() { return client_.connected(); }
 
 void KeepAliveClient::end() { client_.stop(); }
 
-bool KeepAliveClient::request(const char* path, const char* api_key,
+bool KeepAliveClient::request(const char* path, const char* token,
                               Response& res, BodyStream& body) {
   res = Response();
   if (!ensure_connected()) return false;
@@ -185,8 +185,8 @@ bool KeepAliveClient::request(const char* path, const char* api_key,
   req += path;
   req += " HTTP/1.1\r\nHost: ";
   req += host_;
-  req += "\r\nx-apisports-key: ";
-  req += api_key;
+  req += "\r\nX-Auth-Token: ";
+  req += token;
   req += "\r\nAccept: application/json\r\n";
   // gzip が返ると ESP32 側で展開できずストリーミングパースが破綻する。
   req += "Accept-Encoding: identity\r\n";
@@ -224,10 +224,11 @@ bool KeepAliveClient::request(const char* path, const char* api_key,
       res.chunked = lower(value).find("chunked") != std::string::npos;
     } else if (name == "connection") {
       res.keep_alive = lower(value).find("close") == std::string::npos;
-    } else if (name == "x-ratelimit-requests-remaining") {
-      res.daily_remaining = atoi(value.c_str());
-    } else if (name == "x-ratelimit-remaining") {
+    } else if (name == "x-requests-available-minute") {
       res.minute_remaining = atoi(value.c_str());
+    } else if (name == "retry-after" ||
+               name == "x-requestcounter-reset") {
+      res.retry_after_sec = atoi(value.c_str());
     }
   }
 
@@ -246,31 +247,34 @@ void KeepAliveClient::finish(BodyStream& body, const Response& res) {
 // --- RatePacer ----------------------------------------------------------
 
 void RatePacer::wait_turn() {
-  if (per_minute_ <= 0) return;
-  const int window = per_minute_ < kMaxWindow ? per_minute_ : kMaxWindow;
-
-  unsigned long now = millis();
-  // 60秒より古い記録を捨てる
-  int keep = 0;
-  for (int i = 0; i < count_; ++i) {
-    if (now - stamps_[i] < 60000UL) stamps_[keep++] = stamps_[i];
+  if (interval_ms_ <= 0) {
+    last_ms_ = millis();
+    started_ = true;
+    return;
   }
-  count_ = keep;
-
-  if (count_ >= window) {
-    // 一番古い記録が60秒経過するまで待つ
-    const unsigned long oldest = stamps_[0];
-    const unsigned long elapsed = now - oldest;
-    if (elapsed < 60000UL) {
-      const unsigned long wait = 60000UL - elapsed + 100UL;
+  if (started_) {
+    const unsigned long elapsed = millis() - last_ms_;
+    if (elapsed < static_cast<unsigned long>(interval_ms_)) {
+      const unsigned long wait = interval_ms_ - elapsed;
       waited_ms_ += wait;
       delay(wait);
-      now = millis();
     }
-    for (int i = 1; i < count_; ++i) stamps_[i - 1] = stamps_[i];
-    --count_;
   }
-  if (count_ < kMaxWindow) stamps_[count_++] = now;
+  last_ms_ = millis();
+  started_ = true;
+}
+
+void RatePacer::back_off(int retry_after_sec) {
+  // サーバが待てと言った時間に従う。無視して再送しない (§2.5-3)。
+  // 指示が無ければ1分。カウンタのリセット周期がそれ以上になることはない。
+  unsigned long wait = (retry_after_sec > 0)
+                           ? static_cast<unsigned long>(retry_after_sec) * 1000UL
+                           : 60000UL;
+  if (wait > 90000UL) wait = 90000UL;  // 起床時間が青天井にならないよう上限
+  waited_ms_ += wait;
+  delay(wait);
+  last_ms_ = millis();
+  started_ = true;
 }
 
 }  // namespace net

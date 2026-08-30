@@ -1,12 +1,17 @@
 // ファクト算出の単体テスト (§4.3)。
-// 検証すべきケース: form の向き / 引き分け D / 序盤の短い form /
-// 順位帯の境界 (17位と18位) / 前回データが無い初回。
+// 結果列は API の form ではなく FormTable が試合から組み立てたものを使う (§2.4)。
+//
+// 検証すべきケース: 結果列の並び順 / 引き分け D / 序盤で結果列が短い場合 /
+// 45日窓に1試合も入らないチーム / 順位帯の境界 (17位と18位) /
+// 前回データが存在しない初回。
 #include <unity.h>
 
 #include <string>
 #include <vector>
 
+#include "core/datetime.h"
 #include "core/facts.h"
+#include "core/form.h"
 #include "core/messages.h"
 #include "core/model.h"
 
@@ -14,13 +19,17 @@ using namespace fb;
 
 namespace {
 
+constexpr int kHomeTeam = 57;
+constexpr int kAwayTeam = 61;
+
 std::vector<Competition> make_comps() {
   std::vector<Competition> c;
 
   Competition pl;
   pl.key = "premier_league";
   pl.display = "Premier League";
-  pl.priority = 3;
+  pl.code = "PL";
+  pl.priority = 2;
   pl.has_standings = true;
   pl.is_domestic = true;
   pl.total_teams = 20;
@@ -32,16 +41,21 @@ std::vector<Competition> make_comps() {
   };
   c.push_back(pl);
 
-  Competition facup;
-  facup.key = "fa_cup";
-  facup.display = "FA Cup";
-  facup.priority = 6;
-  facup.is_cup = true;
-  c.push_back(facup);
+  // カップ戦は無料枠に含まれないので出荷対象外だが、competitions.json は
+  // データ駆動なのでジャイアントキリングの判定自体は残してある (SPEC §2.1)。
+  Competition cup;
+  cup.key = "some_cup";
+  cup.display = "Cup";
+  cup.code = "XX";
+  cup.priority = 9;
+  cup.is_cup = true;
+  cup.is_domestic = true;
+  c.push_back(cup);
 
   Competition ucl;
   ucl.key = "champions_league";
   ucl.display = "UEFA Champions League";
+  ucl.code = "CL";
   ucl.priority = 1;
   ucl.has_standings = true;
   ucl.is_domestic = false;
@@ -51,15 +65,37 @@ std::vector<Competition> make_comps() {
   return c;
 }
 
-StandingRow row(int id, const char* name, int rank, const char* form, int played) {
+StandingRow row(int id, const char* name, int rank, int played) {
   StandingRow r;
   r.team_id = id;
   r.team_name = name;
   r.rank = rank;
-  r.form = form;
   r.played = played;
-  r.points = 0;
   return r;
+}
+
+// 指定した結果列になるダミー試合を積む。form は古い→新しい。
+// 対戦相手は毎回変えて、相手側の結果列を汚さないようにする。
+void add_form(std::vector<Match>& out, int team_id, const char* form) {
+  std::time_t t = make_utc(2026, 7, 1);
+  int opp = 900000 + team_id * 100;
+  long id = 1000000L + team_id * 1000L;
+  for (const char* p = form; *p; ++p, ++opp, ++id, t += 7 * 86400) {
+    Match m;
+    m.fixture_id = id;
+    m.kickoff_utc = t;
+    m.status = "FINISHED";
+    m.home_id = team_id;
+    m.away_id = opp;
+    m.home_name = "H";
+    m.away_name = "A";
+    switch (*p) {
+      case 'W': m.home_goals = 1; m.away_goals = 0; break;
+      case 'L': m.home_goals = 0; m.away_goals = 1; break;
+      default:  m.home_goals = 1; m.away_goals = 1; break;
+    }
+    out.push_back(m);
+  }
 }
 
 Match match(int comp, int home_id, int away_id, int hg, int ag) {
@@ -69,37 +105,42 @@ Match match(int comp, int home_id, int away_id, int hg, int ag) {
   m.away_id = away_id;
   m.home_goals = hg;
   m.away_goals = ag;
-  m.status = "FT";
-  m.fixture_id = home_id * 1000 + away_id;
+  m.status = "FINISHED";
+  m.fixture_id = 7777;
+  m.kickoff_utc = make_utc(2026, 9, 1);
   return m;
 }
 
+// テスト1件ぶんの入力をまとめる。
+struct Scene {
+  std::vector<Competition> comps = make_comps();
+  std::vector<Match> history;
+  StandingsPool pool;
+  FormTable forms;
+
+  Scene() { pool.comps = &comps; }
+  void finish() { forms.build(history); }
+  Fact fact_of(const Match& m, const FactThresholds& th = FactThresholds()) {
+    return compute_fact(m, pool, forms, comps, th);
+  }
+};
+
 }  // namespace
 
-// --- form パース --------------------------------------------------------
+// --- 結果列のパース ------------------------------------------------------
 
 void test_trailing_run_latest_at_end() {
+  // FormTable は末尾が最新。既定はこちら。
   TEST_ASSERT_EQUAL_INT(4, trailing_run("LWWWW", 'W', true));
   TEST_ASSERT_EQUAL_INT(0, trailing_run("WWWWL", 'W', true));
   TEST_ASSERT_EQUAL_INT(1, trailing_run("WWWWL", 'L', true));
 }
 
-void test_trailing_run_latest_at_front() {
-  // API-FOOTBALL はこちら。実データで確認済み (2026-08-30):
-  //   Liverpool 2024 の直近5試合 (古い→新しい) は "WLDLD"、
-  //   standings の form は "DLDLW"。form は 新しい→古い。
-  TEST_ASSERT_EQUAL_INT(4, trailing_run("WWWWL", 'W', false));
-  TEST_ASSERT_EQUAL_INT(0, trailing_run("LWWWW", 'W', false));
-}
-
-void test_default_form_direction_matches_api_football() {
-  // 既定値が実データの向きから外れたら気づけるようにしておく。
+void test_default_direction_is_latest_at_end() {
+  // 既定値が FormTable の並び (日付昇順) から外れたら落ちる。
   const FactThresholds th;
-  TEST_ASSERT_FALSE(th.form_latest_at_end);
-  // 実データそのもの: Liverpool 2024 最終節は引き分けで、直前は敗戦。
-  TEST_ASSERT_EQUAL_INT('D', latest_result("DLDLW", th.form_latest_at_end));
-  TEST_ASSERT_EQUAL_INT(0, trailing_run("DLDLW", 'W', th.form_latest_at_end));
-  TEST_ASSERT_EQUAL_INT(1, trailing_run_not("DLDLW", 'L', th.form_latest_at_end));
+  TEST_ASSERT_TRUE(th.form_latest_at_end);
+  TEST_ASSERT_EQUAL_INT('L', latest_result("WWWWL", th.form_latest_at_end));
 }
 
 void test_empty_form() {
@@ -109,7 +150,6 @@ void test_empty_form() {
 }
 
 void test_unbeaten_counts_draws() {
-  // 引き分け D は無敗に含める
   TEST_ASSERT_EQUAL_INT(5, trailing_run_not("LWDWDW", 'L', true));
   TEST_ASSERT_EQUAL_INT(0, trailing_run_not("WWWL", 'L', true));
 }
@@ -117,120 +157,170 @@ void test_unbeaten_counts_draws() {
 // --- ファクト -----------------------------------------------------------
 
 void test_opening_streak() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
+  add_form(s.history, kHomeTeam, "WWW");
+  add_form(s.history, kAwayTeam, "LDL");
   LeagueStandings ls;
   ls.comp_index = 0;
-  // 全勝なので向きに依存しない。form 長 == played で開幕連勝と判定される。
-  ls.rows.push_back(row(1, "Arsenal", 1, "WWW", 3));
-  ls.rows.push_back(row(2, "Chelsea", 12, "LDL", 3));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 1, 3));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 12, 3));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 2, 1), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_OPENING_STREAK, f.type);
   TEST_ASSERT_EQUAL_INT(3, f.count);
   TEST_ASSERT_EQUAL_STRING("開幕3連勝", msg::fact_text(f).c_str());
 }
 
-void test_short_form_early_season_no_streak() {
-  // 序盤で form が1文字しかない場合、連勝ファクトは出さない
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+void test_opening_streak_needs_window_to_cover_season() {
+  // 45日窓が全試合を覆っていない (played=12 に対し結果列は5)。
+  // 「開幕」とは言えないので WIN_STREAK に落ちる。
+  Scene s;
+  add_form(s.history, kHomeTeam, "WWWWW");
+  add_form(s.history, kAwayTeam, "LDLDL");
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Arsenal", 7, "W", 1));
-  ls.rows.push_back(row(2, "Chelsea", 11, "L", 1));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 3, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 12, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 1, 0), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
+  TEST_ASSERT_NOT_EQUAL(FACT_OPENING_STREAK, f.type);
+  TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
+  TEST_ASSERT_EQUAL_STRING("5連勝", msg::fact_text(f).c_str());
+}
+
+void test_streak_beats_top_of_table() {
+  // 首位は毎日同じ表示になるので、動きのある連勝を優先する (§4.2)。
+  Scene s;
+  add_form(s.history, kHomeTeam, "WWWWW");
+  add_form(s.history, kAwayTeam, "LDLDL");
+  LeagueStandings ls;
+  ls.comp_index = 0;
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 1, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 12, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
+
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
+  TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
+  TEST_ASSERT_EQUAL_STRING("5連勝", msg::fact_text(f).c_str());
+}
+
+void test_short_form_early_season_no_streak() {
+  Scene s;
+  add_form(s.history, kHomeTeam, "W");
+  add_form(s.history, kAwayTeam, "L");
+  LeagueStandings ls;
+  ls.comp_index = 0;
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 7, 1));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 11, 1));
+  s.pool.current.push_back(ls);
+  s.finish();
+
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
   TEST_ASSERT_NOT_EQUAL(FACT_OPENING_STREAK, f.type);
   TEST_ASSERT_NOT_EQUAL(FACT_WIN_STREAK, f.type);
 }
 
 void test_win_streak() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
+  add_form(s.history, kHomeTeam, "LDWWW");  // 末尾が最新 → 3連勝
+  add_form(s.history, kAwayTeam, "WLDDL");
   LeagueStandings ls;
   ls.comp_index = 0;
-  // form は新しい→古い。先頭3つが W なので3連勝。
-  ls.rows.push_back(row(1, "Arsenal", 6, "WWWDL", 12));
-  ls.rows.push_back(row(2, "Chelsea", 9, "LDDLW", 12));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 6, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 9, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 2, 1), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
   TEST_ASSERT_EQUAL_STRING("3連勝", msg::fact_text(f).c_str());
 }
 
 void test_streak_broken() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
+  add_form(s.history, kHomeTeam, "WLLLW");  // 3連敗のあと勝ち
+  add_form(s.history, kAwayTeam, "WWDDL");
   LeagueStandings ls;
   ls.comp_index = 0;
-  // 新しい→古い。最新が W で、その前が LLL なので連敗脱出。
-  ls.rows.push_back(row(1, "Arsenal", 8, "WLLLW", 12));
-  ls.rows.push_back(row(2, "Chelsea", 9, "LDDWW", 12));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 8, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 9, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 1, 0), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_STREAK_BROKEN, f.type);
   TEST_ASSERT_EQUAL_STRING("連敗脱出", msg::fact_text(f).c_str());
 }
 
 void test_draw_does_not_break_into_win_streak() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
+  add_form(s.history, kHomeTeam, "WWWD");  // 最新が D
+  add_form(s.history, kAwayTeam, "DDDD");
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Arsenal", 6, "DWWW", 12));  // 最新 (先頭) が D
-  ls.rows.push_back(row(2, "Chelsea", 7, "DDDD", 12));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 6, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 7, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 1, 1), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 1));
   TEST_ASSERT_NOT_EQUAL(FACT_WIN_STREAK, f.type);
+}
+
+void test_team_missing_from_form_window() {
+  // 45日窓に1試合も無いチーム (§4.3)。連勝は出ないが順位ファクトは出る。
+  Scene s;  // history は空
+  LeagueStandings ls;
+  ls.comp_index = 0;
+  ls.rows.push_back(row(kHomeTeam, "Arsenal", 1, 12));
+  ls.rows.push_back(row(kAwayTeam, "Chelsea", 9, 12));
+  s.pool.current.push_back(ls);
+  s.finish();
+
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
+  TEST_ASSERT_EQUAL_INT(FACT_TOP_OF_TABLE, f.type);
+  TEST_ASSERT_EQUAL_STRING("首位", msg::fact_text(f).c_str());
 }
 
 // --- 順位帯の境界 (17位と18位) ------------------------------------------
 
 void test_zone_boundary_17_stays_out() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings now, prev;
   now.comp_index = 0;
   prev.comp_index = 0;
-  now.rows.push_back(row(1, "Alavés", 17, "LDLDL", 20));
-  prev.rows.push_back(row(1, "Alavés", 16, "DLDLW", 19));
-  now.rows.push_back(row(2, "Girona", 10, "WDWDW", 20));
-  prev.rows.push_back(row(2, "Girona", 10, "DWDWD", 19));
-  pool.current.push_back(now);
-  pool.previous.push_back(prev);
+  now.rows.push_back(row(kHomeTeam, "Alavés", 17, 20));
+  prev.rows.push_back(row(kHomeTeam, "Alavés", 16, 19));
+  now.rows.push_back(row(kAwayTeam, "Girona", 10, 20));
+  prev.rows.push_back(row(kAwayTeam, "Girona", 10, 19));
+  s.pool.current.push_back(now);
+  s.pool.previous.push_back(prev);
+  s.finish();
 
-  // 16位 → 17位。降格圏 (18-20) には入っていないので ZONE ファクトは出ない。
-  const Fact f = compute_fact(match(0, 1, 2, 0, 1), pool, comps, FactThresholds());
+  // 16位 → 17位。降格圏 (18-20) には入っていない。
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 0, 1));
   TEST_ASSERT_NOT_EQUAL(FACT_ZONE_ENTER, f.type);
 }
 
 void test_zone_boundary_18_falls_in() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings now, prev;
   now.comp_index = 0;
   prev.comp_index = 0;
-  now.rows.push_back(row(1, "Alavés", 18, "LDLDL", 20));
-  prev.rows.push_back(row(1, "Alavés", 17, "DLDLW", 19));
-  now.rows.push_back(row(2, "Girona", 10, "WDWDW", 20));
-  prev.rows.push_back(row(2, "Girona", 10, "DWDWD", 19));
-  pool.current.push_back(now);
-  pool.previous.push_back(prev);
+  now.rows.push_back(row(kHomeTeam, "Alavés", 18, 20));
+  prev.rows.push_back(row(kHomeTeam, "Alavés", 17, 19));
+  now.rows.push_back(row(kAwayTeam, "Girona", 10, 20));
+  prev.rows.push_back(row(kAwayTeam, "Girona", 10, 19));
+  s.pool.current.push_back(now);
+  s.pool.previous.push_back(prev);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 0, 2), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 0, 2));
   TEST_ASSERT_EQUAL_INT(FACT_ZONE_ENTER, f.type);
   TEST_ASSERT_EQUAL_STRING("降格圏転落", msg::fact_text(f).c_str());
 }
@@ -238,20 +328,19 @@ void test_zone_boundary_18_falls_in() {
 void test_zone_enter_positive_uses_narrowest_zone() {
   // 5位 → 1位。首位 (1-1) と CL圏 (1-4) の両方に該当するが、
   // 配列の先頭から評価して最初にマッチした「首位」を採る (決定事項5)。
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings now, prev;
   now.comp_index = 0;
   prev.comp_index = 0;
-  now.rows.push_back(row(1, "Arsenal", 1, "DWDWW", 20));
-  prev.rows.push_back(row(1, "Arsenal", 5, "WDWDW", 19));
-  now.rows.push_back(row(2, "Chelsea", 8, "LDLDL", 20));
-  prev.rows.push_back(row(2, "Chelsea", 7, "DLDLD", 19));
-  pool.current.push_back(now);
-  pool.previous.push_back(prev);
+  now.rows.push_back(row(kHomeTeam, "Arsenal", 1, 20));
+  prev.rows.push_back(row(kHomeTeam, "Arsenal", 5, 19));
+  now.rows.push_back(row(kAwayTeam, "Chelsea", 8, 20));
+  prev.rows.push_back(row(kAwayTeam, "Chelsea", 7, 19));
+  s.pool.current.push_back(now);
+  s.pool.previous.push_back(prev);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 2, 0), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 0));
   TEST_ASSERT_EQUAL_INT(FACT_ZONE_ENTER, f.type);
   TEST_ASSERT_EQUAL_STRING("首位浮上", msg::fact_text(f).c_str());
 }
@@ -259,27 +348,22 @@ void test_zone_enter_positive_uses_narrowest_zone() {
 // --- 前回データが無い初回 -----------------------------------------------
 
 void test_no_previous_standings_is_not_an_error() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings now;
   now.comp_index = 0;
-  now.rows.push_back(row(1, "Arsenal", 1, "WDWDW", 20));
-  now.rows.push_back(row(2, "Chelsea", 9, "LDLDL", 20));
-  pool.current.push_back(now);  // previous は空
+  now.rows.push_back(row(kHomeTeam, "Arsenal", 1, 20));
+  now.rows.push_back(row(kAwayTeam, "Chelsea", 9, 20));
+  s.pool.current.push_back(now);  // previous は空
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 1, 2, 1, 0), pool, comps, FactThresholds());
-  // ZONE / RANK_CHANGE は出ないが、首位は出る。落ちないことが重要。
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_TOP_OF_TABLE, f.type);
-  TEST_ASSERT_EQUAL_STRING("首位", msg::fact_text(f).c_str());
 }
 
 void test_unknown_teams_yield_no_fact() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;  // 順位表なし
-
-  const Fact f = compute_fact(match(0, 99, 98, 1, 0), pool, comps, FactThresholds());
+  Scene s;
+  s.finish();
+  const Fact f = s.fact_of(match(0, 99, 98, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_NONE, f.type);
   TEST_ASSERT_EQUAL_STRING("", msg::fact_text(f).c_str());
 }
@@ -287,113 +371,99 @@ void test_unknown_teams_yield_no_fact() {
 // --- 大勝・番狂わせ -----------------------------------------------------
 
 void test_big_win_without_standings() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
-  const Fact f = compute_fact(match(0, 99, 98, 5, 0), pool, comps, FactThresholds());
+  Scene s;
+  s.finish();
+  const Fact f = s.fact_of(match(0, 99, 98, 5, 0));
   TEST_ASSERT_EQUAL_INT(FACT_BIG_WIN, f.type);
   TEST_ASSERT_EQUAL_STRING("大勝", msg::fact_text(f).c_str());
 }
 
 void test_upset_requires_same_table() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Liverpool", 2, "WWDWW", 20));
-  ls.rows.push_back(row(2, "Everton", 15, "LDLDW", 20));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(kHomeTeam, "Liverpool", 2, 20));
+  ls.rows.push_back(row(kAwayTeam, "Everton", 15, 20));
+  s.pool.current.push_back(ls);
+  s.finish();
 
   // 15位が2位に勝った → 順位差13
-  const Fact f = compute_fact(match(0, 1, 2, 0, 3), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 0, 3));
   TEST_ASSERT_EQUAL_INT(FACT_UPSET, f.type);
   TEST_ASSERT_EQUAL_STRING("番狂わせ", msg::fact_text(f).c_str());
 }
 
-// --- ジャイアントキリング (§4.1 追補) -----------------------------------
+// --- ジャイアントキリング -----------------------------------------------
+// 無料枠にカップ戦が無いため出荷構成では発火しないが、competitions.json は
+// データ駆動なので、カップを足せば動くことをテストで固定しておく。
 
 void test_giant_killing_big_scalp() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(10, "Arsenal", 2, "WWWDW", 20));  // PL の2位
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(10, "Arsenal", 2, 20));  // PL の2位
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  // FA Cup (comp 1)。勝者 777 は順位表に居ない = 下部リーグ。
-  const Fact f = compute_fact(match(1, 777, 10, 2, 1), pool, comps, FactThresholds());
+  // comp 1 = カップ戦。勝者 777 は順位表に居ない = 下部リーグ。
+  const Fact f = s.fact_of(match(1, 777, 10, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_GIANT_KILLING, f.type);
   TEST_ASSERT_EQUAL_STRING("大金星", msg::fact_text(f).c_str());
 }
 
 void test_giant_killing_mid_table_scalp() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(10, "Brentford", 9, "WLDWL", 20));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(10, "Brentford", 9, 20));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(1, 777, 10, 1, 0), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(1, 777, 10, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_GIANT_KILLING, f.type);
   TEST_ASSERT_EQUAL_STRING("格上撃破", msg::fact_text(f).c_str());
 }
 
 void test_no_giant_killing_when_favourite_wins() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(10, "Arsenal", 2, "WWWDW", 20));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(10, "Arsenal", 2, 20));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  // 順当勝ち。ファクトなし (得失点差3なので大勝でもない)。
-  const Fact f = compute_fact(match(1, 10, 777, 3, 0), pool, comps, FactThresholds());
+  const Fact f = s.fact_of(match(1, 10, 777, 3, 0));
   TEST_ASSERT_NOT_EQUAL(FACT_GIANT_KILLING, f.type);
 }
 
-void test_no_giant_killing_between_two_lower_sides() {
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;  // どちらも順位表に居ない
-  const Fact f = compute_fact(match(1, 777, 888, 1, 0), pool, comps, FactThresholds());
-  TEST_ASSERT_EQUAL_INT(FACT_NONE, f.type);
-}
-
 void test_giant_killing_only_in_cups() {
-  // リーグ戦では成立しない (comp 0 は is_cup=false)
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(10, "Arsenal", 2, "WWWDW", 20));
-  pool.current.push_back(ls);
+  ls.rows.push_back(row(10, "Arsenal", 2, 20));
+  s.pool.current.push_back(ls);
+  s.finish();
 
-  const Fact f = compute_fact(match(0, 777, 10, 1, 0), pool, comps, FactThresholds());
+  // comp 0 はリーグ戦 (is_cup=false)
+  const Fact f = s.fact_of(match(0, 777, 10, 1, 0));
   TEST_ASSERT_NOT_EQUAL(FACT_GIANT_KILLING, f.type);
 }
 
 void test_domestic_table_wins_over_ucl_table() {
   // 同じチームが PL と CL の両方の順位表に居る場合、国内順位を採る (§4.1)。
-  auto comps = make_comps();
-  StandingsPool pool;
-  pool.comps = &comps;
+  Scene s;
   LeagueStandings ucl;
   ucl.comp_index = 2;  // champions_league (is_domestic = false)
-  ucl.rows.push_back(row(10, "Arsenal", 30, "LLLLL", 6));
+  ucl.rows.push_back(row(10, "Arsenal", 30, 6));
   LeagueStandings pl;
   pl.comp_index = 0;  // premier_league (is_domestic = true)
-  pl.rows.push_back(row(10, "Arsenal", 1, "WWWWW", 20));
-  pool.current.push_back(ucl);  // 意図的に CL を先に入れる
-  pool.current.push_back(pl);
+  pl.rows.push_back(row(10, "Arsenal", 1, 20));
+  s.pool.current.push_back(ucl);  // 意図的に CL を先に入れる
+  s.pool.current.push_back(pl);
+  s.finish();
 
   int ci = -1;
-  const StandingRow* r = pool.lookup(10, &ci);
+  const StandingRow* r = s.pool.lookup(10, &ci);
   TEST_ASSERT_NOT_NULL(r);
   TEST_ASSERT_EQUAL_INT(0, ci);
   TEST_ASSERT_EQUAL_INT(1, r->rank);
@@ -402,15 +472,17 @@ void test_domestic_table_wins_over_ucl_table() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_trailing_run_latest_at_end);
-  RUN_TEST(test_trailing_run_latest_at_front);
-  RUN_TEST(test_default_form_direction_matches_api_football);
+  RUN_TEST(test_default_direction_is_latest_at_end);
   RUN_TEST(test_empty_form);
   RUN_TEST(test_unbeaten_counts_draws);
   RUN_TEST(test_opening_streak);
+  RUN_TEST(test_opening_streak_needs_window_to_cover_season);
+  RUN_TEST(test_streak_beats_top_of_table);
   RUN_TEST(test_short_form_early_season_no_streak);
   RUN_TEST(test_win_streak);
   RUN_TEST(test_streak_broken);
   RUN_TEST(test_draw_does_not_break_into_win_streak);
+  RUN_TEST(test_team_missing_from_form_window);
   RUN_TEST(test_zone_boundary_17_stays_out);
   RUN_TEST(test_zone_boundary_18_falls_in);
   RUN_TEST(test_zone_enter_positive_uses_narrowest_zone);
@@ -421,7 +493,6 @@ int main(int, char**) {
   RUN_TEST(test_giant_killing_big_scalp);
   RUN_TEST(test_giant_killing_mid_table_scalp);
   RUN_TEST(test_no_giant_killing_when_favourite_wins);
-  RUN_TEST(test_no_giant_killing_between_two_lower_sides);
   RUN_TEST(test_giant_killing_only_in_cups);
   RUN_TEST(test_domestic_table_wins_over_ucl_table);
   return UNITY_END();

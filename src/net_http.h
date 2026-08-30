@@ -51,9 +51,9 @@ struct Response {
   bool chunked = false;
   long content_length = -1;
   bool keep_alive = true;
-  // API-SPORTS のレート制限ヘッダ (§2.3)。無ければ -1。
-  int daily_remaining = -1;
-  int minute_remaining = -1;
+  // football-data.org のレート制限ヘッダ (§2.5)。無ければ -1 / 0。
+  int minute_remaining = -1;  // X-Requests-Available-Minute
+  int retry_after_sec = 0;    // 429 のとき Retry-After / X-RequestCounter-Reset
 };
 
 class KeepAliveClient {
@@ -65,7 +65,8 @@ class KeepAliveClient {
 
   // 1リクエスト送って、ヘッダまで読む。成功したら body に本文を接続する。
   // 失敗時は false。呼び出し側は必ず finish() を呼ぶこと。
-  bool request(const char* path, const char* api_key, Response& res,
+  // token は X-Auth-Token ヘッダに入れる (football-data.org)。
+  bool request(const char* path, const char* token, Response& res,
                BodyStream& body);
   // ボディを読み切り、次のリクエストに備える。
   void finish(BodyStream& body, const Response& res);
@@ -82,20 +83,23 @@ class KeepAliveClient {
   int handshakes_ = 0;
 };
 
-// 毎分レート制限を守るためのペーサ (§2.4 改訂)。
-// 無料プランは 10 req/min。守らないと 429 で丸ごと失敗する。
+// レート制限を守るためのペーサ (§2.5)。
+// 無料枠は 10 req/min。上限ぴったりを狙わず、リクエスト間に一定の
+// ウェイト (既定7秒 = 約8.5 req/min) を必ず入れる。
+// keep-alive 接続はウェイト中も維持したままにする (§2.6)。
 class RatePacer {
  public:
-  explicit RatePacer(int per_minute) : per_minute_(per_minute) {}
-  // 次のリクエストを投げてよくなるまで待つ。
+  explicit RatePacer(int min_interval_ms) : interval_ms_(min_interval_ms) {}
+  // 前回のリクエストから interval_ms_ 経つまで待つ。初回は待たない。
   void wait_turn();
+  // 429 を受けたときに、サーバの指示ぶんだけ余分に待つ (§2.5-3)。
+  void back_off(int retry_after_sec);
   unsigned long waited_ms() const { return waited_ms_; }
 
  private:
-  static constexpr int kMaxWindow = 32;
-  int per_minute_;
-  unsigned long stamps_[kMaxWindow] = {0};
-  int count_ = 0;
+  int interval_ms_;
+  unsigned long last_ms_ = 0;
+  bool started_ = false;
   unsigned long waited_ms_ = 0;
 };
 

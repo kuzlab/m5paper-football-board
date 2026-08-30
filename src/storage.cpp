@@ -123,52 +123,6 @@ void set_last_success_utc(std::time_t t) {
   if (g_nvs_ok) g_prefs.putLong64("last_ok", static_cast<int64_t>(t));
 }
 
-// --- 予算 ---------------------------------------------------------------
-
-bool load_budget(BudgetState& s) {
-  std::string json;
-  if (read_file(kBudgetPath, json, 1024)) {
-    JsonDocument doc;
-    if (!deserializeJson(doc, json)) {
-      s.utc_day = doc["utc_day"] | -1L;
-      s.requests_used = doc["requests_used"] | 0;
-      s.manual_fetches = doc["manual_fetches"] | 0;
-      s.auto_done = doc["auto_done"] | false;
-      s.api_remaining = doc["api_remaining"] | -1;
-      return true;
-    }
-  }
-  // SD が読めないときは NVS のミラーから復元する。上限を無効化しない。
-  if (g_nvs_ok) {
-    s.utc_day = static_cast<long>(g_prefs.getLong64("bg_day", -1));
-    s.requests_used = g_prefs.getInt("bg_used", 0);
-    s.manual_fetches = g_prefs.getInt("bg_manual", 0);
-    s.auto_done = g_prefs.getBool("bg_auto", false);
-    s.api_remaining = g_prefs.getInt("bg_rem", -1);
-    return s.utc_day >= 0;
-  }
-  return false;
-}
-
-bool save_budget(const BudgetState& s) {
-  if (g_nvs_ok) {
-    g_prefs.putLong64("bg_day", static_cast<int64_t>(s.utc_day));
-    g_prefs.putInt("bg_used", s.requests_used);
-    g_prefs.putInt("bg_manual", s.manual_fetches);
-    g_prefs.putBool("bg_auto", s.auto_done);
-    g_prefs.putInt("bg_rem", s.api_remaining);
-  }
-  JsonDocument doc;
-  doc["utc_day"] = s.utc_day;
-  doc["requests_used"] = s.requests_used;
-  doc["manual_fetches"] = s.manual_fetches;
-  doc["auto_done"] = s.auto_done;
-  doc["api_remaining"] = s.api_remaining;
-  std::string out;
-  serializeJson(doc, out);
-  return write_file_atomic(kBudgetPath, out);
-}
-
 // --- 前回順位表 ---------------------------------------------------------
 
 bool load_standings(const std::vector<Competition>& comps,
@@ -207,18 +161,6 @@ bool save_seen_fixtures(const std::vector<long>& in, std::size_t max_keep) {
   std::string out;
   serializeJson(doc, out);
   return write_file_atomic(kSeenPath, out);
-}
-
-// --- リーグ ID ----------------------------------------------------------
-
-bool load_league_ids(LeagueIdCache& out) {
-  std::string json;
-  if (!read_file(kLeagueIdsPath, json, 4096)) return false;
-  return parse_league_ids(json.c_str(), json.size(), out);
-}
-
-bool save_league_ids(const LeagueIdCache& in) {
-  return write_file_atomic(kLeagueIdsPath, serialize_league_ids(in));
 }
 
 }  // namespace storage

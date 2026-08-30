@@ -61,7 +61,7 @@ jobs:
       - name: no obvious credentials in source
         run: |
           # 実行時に SD から読む設計なので、ソースに鍵が現れてはいけない (§7.1)
-          if grep -rInE 'apisports_key[[:space:]]*=[[:space:]]*"[A-Za-z0-9]{16,}"' src/ ; then
+          if grep -rInE 'football_data_token[[:space:]]*=[[:space:]]*"[A-Za-z0-9]{16,}"' src/ ; then
             echo "::error::hard-coded API key found in src/"
             exit 1
           fi

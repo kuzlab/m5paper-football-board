@@ -1,4 +1,6 @@
-#include "core/season.h"
+#include "core/datetime.h"
+
+#include <cstdio>
 
 namespace fb {
 namespace {
@@ -35,17 +37,19 @@ std::time_t make_utc(int year, int month, int day, int hour, int min, int sec) {
   return static_cast<std::time_t>(days) * 86400 + hour * 3600 + min * 60 + sec;
 }
 
-int season_year_from_ymd(int year, int month, int cutover_month) {
-  return month >= cutover_month ? year : year - 1;
+long utc_day_of(std::time_t utc) {
+  long d = static_cast<long>(utc / 86400);
+  if (utc < 0 && utc % 86400 != 0) d -= 1;  // 負方向の切り捨て
+  return d;
 }
 
-int season_year_from_utc(std::time_t utc, int cutover_month) {
+std::string utc_date_string(std::time_t utc) {
   int y = 0;
   unsigned m = 0, d = 0;
-  long days = static_cast<long>(utc / 86400);
-  if (utc < 0 && utc % 86400 != 0) days -= 1;  // 負方向の切り捨て
-  civil_from_days(days, &y, &m, &d);
-  return season_year_from_ymd(y, static_cast<int>(m), cutover_month);
+  civil_from_days(utc_day_of(utc), &y, &m, &d);
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+  return std::string(buf);
 }
 
 }  // namespace fb

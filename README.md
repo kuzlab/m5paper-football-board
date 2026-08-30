@@ -1,6 +1,7 @@
 # M5Paper 単体サッカー結果掲示板
 
-欧州サッカー8競技の直近結果を、1日1回の自動更新で e-paper に表示する掲示板。
+欧州サッカー4競技（CL / プレミア / ブンデス / ラ・リーガ）の直近結果を、
+1日1回の自動更新で e-paper に表示する掲示板。
 **サーバーも MQTT ブローカーも使わず、M5Paper 単体で完結する。**
 
 仕様書: [`SPEC_m5paper_standalone_football.md`](SPEC_m5paper_standalone_football.md)
@@ -14,8 +15,8 @@
 │   Liverpool          0 - 3  Everton          番狂わせ        │
 │ ■ Bundesliga                                               │
 │   Bayern München     4 - 0  Union Berlin     首位           │
-│ ■ FA Cup                                                   │
-│   Bromley            2 - 1  Arsenal          大金星          │
+│ ■ LaLiga                                                   │
+│   Alavés             0 - 2  Girona           降格圏転落      │
 │                                          ほか 6試合          │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -26,8 +27,27 @@
 
 - M5Paper (v1.1)
 - microSD カード — **必ず FAT32**。後述の注意を参照
-- API-FOOTBALL (API-SPORTS) のアカウント — 無料プランで動く
+- [football-data.org](https://www.football-data.org/client/register) のトークン
+  — 氏名とメールのみで取得でき、無料枠で動く
 - Wi-Fi (2.4GHz)
+
+## 対象競技
+
+| 優先度 | 競技会 | コード |
+|---|---|---|
+| 1 | UEFA Champions League | `CL` |
+| 2 | Premier League | `PL` |
+| 3 | Bundesliga | `BL1` |
+| 4 | LaLiga | `PD` |
+
+**Europa League / FA Cup / DFB-Pokal / Copa del Rey は対象外です。**
+football-data.org の無料枠（12コンペティション）に含まれず、**有料プランに
+上げても解決しません**（€12/月のプランでも競技数は12のまま）。カップ戦を
+安価に取得する現実的な手段が無いため、4競技で確定としています。
+
+その帰結として、**カップ戦のジャイアントキリング判定（`大金星` / `格上撃破`）は
+出荷構成では発火しません。** `competitions.json` はデータ駆動なので、上位プランで
+カップ戦を追加すれば動作します。判定ロジックとテストは残してあります。
 
 ---
 
@@ -67,7 +87,7 @@ microSD 直下/
 
 ```bash
 cp sd/config.example.json sd/config.json
-$EDITOR sd/config.json      # wifi_ssid / wifi_password / apisports_key を入れる
+$EDITOR sd/config.json      # wifi_ssid / wifi_password / football_data_token を入れる
 ```
 
 ### 2. TLS ルート証明書を取る
@@ -158,10 +178,10 @@ pio test -e native
 ```
 
 ```
-native  test_layout  PASSED
-native  test_season  PASSED
-native  test_budget  PASSED
-native  test_facts   PASSED
+native  test_layout    PASSED
+native  test_form      PASSED
+native  test_datetime  PASSED
+native  test_facts     PASSED
 ```
 
 ### 開発中に電源を切らせない
@@ -204,43 +224,49 @@ microSD に書いています (`src/storage.cpp`)。
 
 仕様書からの変更点と、その理由です。
 
-### 自動更新の枠を予約する (SPEC §2.3 の修正)
+### 連勝・連敗は自前で計算する (SPEC §2.4)
 
-日次カウンタは **UTC 00:00 = JST 09:00** にリセットされますが、自動更新は
-**JST 07:00 = 前日 UTC 22:00** に走ります。つまり各 UTC 日の末尾に1回の
-自動更新が入る構造です。
+football-data.org の無料枠では順位表の `form` に依存できません。代わりに
+**45日分の試合一覧から、チームごとの結果列を自前で組み立てます**
+(`src/core/form.cpp`)。
 
-素直に「1日5回まで」とすると、**前日の日中に手動更新を使い切った時点で
-翌朝の自動更新が弾かれます。** そこで:
+1リクエストで2つの用途を賄うのが要点です:
 
-- 今日の自動更新がまだ走っていない間は、`auto_reserve_requests` (既定13)
-  を手動更新から隠す
-- 自動更新が済んだら予約を解放する
-- カウンタはフェッチ回数ではなく**リクエスト数**で持つ (1フェッチが8〜13と
-  変動するため)
-- API が返す `x-ratelimit-requests-remaining` をローカルカウンタより優先する
+- 直近72時間ぶん → 画面表示
+- 45日ぶん全体   → 連勝・連敗の集計
 
-`test/test_budget/` がこの挙動を検証します。
+結果列は必ず**日付昇順（古い→新しい、末尾が最新）**に積みます。呼び出し側が
+どの順で試合を渡しても同じ結果になるよう内部でソートしており、
+`test/test_form/` がそれを固定しています。
 
-### 毎分レート制限を守る (SPEC §2.4 / §6.5 の修正)
+順位表の `form` が来ているかどうかは起動ログに出しますが、**判定には使いません。**
 
-API-SPORTS の無料プランには 100 req/日 に加えて **10 req/分** の制限があります。
-13 リクエストを一気に流すと 11 発目で 429 を食らいます。
+### 連勝は「首位」より優先する
 
-`net::RatePacer` が投入間隔を制御するため、**通信フェーズは最大 90 秒程度**
-かかります。仕様書の「起床から電源断まで20秒以内」はこの制限とは両立しません。
+「首位」は毎日同じ表示になりますが、「5連勝」は日々変わります。ハッシュ一致で
+描画をスキップする設計 (§5.5) とも噛み合うので、`TOP_OF_TABLE` はストリークが
+無いときの受け皿として優先度を下げてあります。
 
-電池への影響は軽微です (90秒 × 実効80mA ≒ 2mAh/日、1150mAh に対して 0.2%/日)。
-keep-alive は引き続き有効で、TLS ハンドシェイクは1回に抑えています。
+### レート制限 (SPEC §2.5)
 
-> **マイルストーン6で実測すること。** 毎分制限が実際には無い/緩ければ
-> `max_requests_per_minute` を上げて元の20秒目標に戻せます。
+無料枠は **10リクエスト/分、日次上限なし**。上限ぴったりを狙わず、リクエスト間に
+**7秒のウェイト**を入れて約8.5 req/分に抑えます (`min_request_interval_ms`)。
 
-### カップ戦のジャイアントキリング (SPEC §4.1 の追補)
+4競技 × 2エンドポイント = 最大8リクエストなので、**通信フェーズは約56秒、
+起床から電源断まで100秒程度**を見込みます。keep-alive はウェイト中も維持します。
 
-FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`form` 由来の
-ファクトも順位帯も算出できません。代わりに、**保持している国内リーグの順位表を
-チームIDの参照テーブルとして使い**、追加リクエストなしで格下の勝利を検出します。
+429 を受けたら `Retry-After` / `X-RequestCounter-Reset` に従って待ち、
+**無視して再送しません。**
+
+> **日次上限が無いため、手動更新を何度押しても「今日の枠を使い切る」ことが
+> ありません。** クールダウン (`min_refresh_sec`) は API 枠のためではなく
+> 電池消費を抑えるために残しています。
+
+### カップ戦のジャイアントキリング（休眠中）
+
+出荷構成にカップ戦が無いため発火しませんが、ロジックは残してあります。
+**保持している国内リーグの順位表をチームIDの参照テーブルとして使い**、
+追加リクエストなしで格下の勝利を検出します。
 
 | 勝者 | 敗者 | 判定 |
 |---|---|---|
@@ -276,13 +302,10 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 試合が少ない日に画面が空になるのを避けるためです
 (`sd/cache/seen_fixtures.json`)。
 
-### リーグ ID は `competitions.json` に同梱
+### 競技会コードは `competitions.json` に同梱
 
-仕様書は `/leagues` で解決してキャッシュせよとしていますが、既知の ID を
-`competitions.json` に書いてあるので**通常は通信が発生しません。** ID が
-欠けている競技会だけ `/leagues` で解決します。
-
-> 同梱の ID は API-FOOTBALL の `/leagues` で必ず検証してください。
+football-data.org はコード (`PL` / `BL1` / `PD` / `CL`) を URL パスに直接使うため、
+ID 解決のリクエストが不要です。
 
 ### 連続失敗時のバックオフ
 
@@ -310,25 +333,25 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 │   ├── main.cpp                   # 起動シーケンス (§6.5)
 │   ├── core/                      # ← デバイス非依存。ネイティブでテストする
 │   │   ├── model.h/.cpp           #   データモデル・順位表プール
-│   │   ├── season.h/.cpp          #   シーズン年の判定 (§2.2)
-│   │   ├── budget.h/.cpp          #   日次リクエスト予算 (§2.3)
+│   │   ├── datetime.h/.cpp        #   日付ユーティリティ (§2.3a)
+│   │   ├── form.h/.cpp            #   結果列の自前集計 (§2.4)
 │   │   ├── facts.h/.cpp           #   ファクト算出 (§4・純粋関数)
 │   │   ├── messages.h/.cpp        #   文言テンプレート (§4.2)
 │   │   ├── selector.h/.cpp        #   選抜と溢れ処理 (§5.2)
 │   │   ├── text_util.h/.cpp       #   UTF-8 切り詰め・グリフ畳み込み (§5.3)
 │   │   └── config_parse.h/.cpp    #   JSON パース (§7.1)
 │   ├── storage.h/.cpp             # NVS / microSD
-│   ├── net_http.h/.cpp            # HTTPS keep-alive・chunked・レート制御 (§2.4)
-│   ├── api_football.h/.cpp        # 取得とフィルタパース (§2, §3)
+│   ├── net_http.h/.cpp            # HTTPS keep-alive・chunked・レート制御 (§2.5-2.6)
+│   ├── football_data.h/.cpp       # 取得とフィルタパース (§2, §3)
 │   ├── render.h/.cpp              # 描画 (§5)
 │   ├── power.h/.cpp               # RTCアラームと電源断 (§6.2)
 │   ├── sht30.h/.cpp               # 温湿度 (§6.1)
 │   └── logging.h/.cpp             # microSD ログ (§8.2)
 ├── test/
-│   ├── test_facts/                # form / 順位帯の境界 / ジャイアントキリング
+│   ├── test_facts/                # 結果列 / 順位帯の境界 / 優先度
+│   ├── test_form/                 # 結果列の集計 (§2.4)
 │   ├── test_layout/               # 切り詰め / 溢れ / グリフ畳み込み
-│   ├── test_season/               # 年末年始の境界
-│   └── test_budget/               # 自動更新枠の予約
+│   └── test_datetime/             # 45日窓の年またぎ・UTC日境界
 ├── tools/
 │   ├── make_vlw.py                # VLW サブセット生成 (§5.4)
 │   └── fetch_ca.sh                # ルート CA 取得 (§2.4)
@@ -347,15 +370,16 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 07:00:03Z INFO +412ms  wake reason: RTC alarm (auto)
 07:00:04Z INFO +1204ms config ok: 8 competitions, wake 07:00 local
 07:00:12Z INFO +9310ms wifi ok in 5120ms, rssi=-58
-07:00:21Z INFO +18402ms fixtures premier_league: 6 matches (heap 142880)
+07:00:21Z INFO +18402ms matches premier_league: 68 in 45d window (heap 142880)
 ...
-07:01:33Z INFO +90118ms fetch: 11 req, 0 http err, 0 parse err, 23 matches, paced 60100ms
-07:01:33Z INFO +90140ms api daily remaining: 78
+07:01:33Z INFO +90118ms fetch: 8 req, 0 http err, 0 parse err, 241 matches in window, paced 49000ms, minute_remaining=2
+07:01:34Z INFO +90140ms form table: 96 teams from 241 matches
+07:01:34Z INFO +90200ms display window: 14 of 241 matches
 07:01:36Z INFO +93002ms render full: 11 rows, 6 overflow, 7 facts
 07:01:37Z INFO +94210ms done in 94210ms, heap=138112, psram=3801088
 ```
 
-**API キーと Wi-Fi パスワードは自動でマスクされます** (`log::register_secret`)。
+**API トークンと Wi-Fi パスワードは自動でマスクされます** (`log::register_secret`)。
 古いログは `log_retention_days` (既定14日) を過ぎると削除されます。
 
 ---
@@ -377,11 +401,12 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 
 **未確認:**
 
-- [ ] `form` 文字列の向き — 末尾が最新かどうか。違っていたら
-      `config.json` の `thresholds.form_latest_at_end` を `false` にする
-- [ ] API-FOOTBALL のフィールド名 (`src/api_football.cpp` のフィルタ)
-- [ ] `competitions.json` のリーグ ID
-- [ ] 毎分レート制限の実際の値 (**マイルストーン6で必ず計測**)
+- [ ] football-data.org のフィールド名 (`src/football_data.cpp` のフィルタ)
+- [ ] `shortName` が実際に短いか、null で返る競技会がないか (§3.2)
+- [ ] 順位表に `form` が含まれるか (起動ログの `api form present=` を見る。
+      **含まれていても判定には使わない**)
+- [ ] 7秒間隔で 429 が出ないこと、通信フェーズの実測時間
+      (**マイルストーン6で必ず計測**)
 - [ ] BM8563 のアラームレジスタ挙動と、**RTC アラーム起動時に AF が
       立つこと** (決定事項2の前提。ボタン起動時に立たないことは確認済み)
 - [ ] EPD モード名 (`m5gfx::epd_mode_t`) と部分書き換えの実測時間
@@ -391,5 +416,5 @@ FA Cup / DFB-Pokal / Copa del Rey には順位表が存在しないため、`for
 ## ライセンス
 
 MIT (`LICENSE`)。第三者の成果物と帰属表示については [`NOTICE.md`](NOTICE.md)
-を参照してください。**API-FOOTBALL の無料プランには表示条件が付く場合が
-あるので、公開前に必ず規約を読んでください。**
+を参照してください。**football-data.org の帰属表示の要否は、公開前に必ず
+規約を確認してください。**

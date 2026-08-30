@@ -10,13 +10,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "api_football.h"
-#include "core/budget.h"
 #include "core/config_parse.h"
+#include "core/datetime.h"
 #include "core/facts.h"
+#include "core/form.h"
 #include "core/messages.h"
-#include "core/season.h"
 #include "core/selector.h"
+#include "football_data.h"
 #include "logging.h"
 #include "net_http.h"
 #include "power.h"
@@ -30,7 +30,6 @@ namespace {
 
 AppConfig g_cfg;
 std::vector<Competition> g_comps;
-BudgetState g_budget;
 render::StatusBar g_bar;
 std::string g_ca_pem;
 unsigned long g_t0 = 0;
@@ -162,13 +161,14 @@ std::time_t sync_time() {
 // 取得したデータからファクトを算出し、画面用の Entry を組む (§4, §5.2)。
 std::vector<Entry> build_entries(const std::vector<Match>& matches,
                                  const StandingsPool& pool,
+                                 const FormTable& forms,
                                  const std::vector<long>& seen) {
   std::vector<Entry> out;
   out.reserve(matches.size());
   for (const auto& m : matches) {
     Entry e;
     e.match = m;
-    e.fact = compute_fact(m, pool, g_comps, g_cfg.thresholds);
+    e.fact = compute_fact(m, pool, forms, g_comps, g_cfg.thresholds);
     e.seen = std::find(seen.begin(), seen.end(), m.fixture_id) != seen.end();
     out.push_back(e);
   }
@@ -211,7 +211,7 @@ void setup() {
     if (!parse_config(json.c_str(), json.size(), g_cfg, err)) {
       fatal_config(err.c_str());
     }
-    log::register_secret(g_cfg.apisports_key);
+    log::register_secret(g_cfg.football_data_token);
     log::register_secret(g_cfg.wifi_password);
   }
   {
@@ -224,7 +224,7 @@ void setup() {
       fatal_config(err.c_str());
     }
   }
-  // ルート CA は SD に置く。setInsecure() は使わない (§2.4)。
+  // ルート CA は SD に置く。setInsecure() は使わない (§2.6)。
   if (!storage::read_file("/ca.pem", g_ca_pem, 16384) || g_ca_pem.empty()) {
     fatal_config("/ca.pem not found (see README: tools/fetch_ca.sh)");
   }
@@ -253,10 +253,9 @@ void setup() {
     finish_and_power_off(now > 0 ? now : rtc_now_utc());
   }
 
-  // --- クールダウンと日次上限 (§2.3, §6.4) -------------------------------
-  storage::load_budget(g_budget);
-  if (now > 0) roll_over(g_budget, now);
-
+  // --- クールダウン (§6.4) -----------------------------------------------
+  // football-data.org には日次上限が無いので API 枠のための制限は不要。
+  // クールダウンは電池消費を抑えるために残す (§2.5-5)。
   const std::time_t last_fetch = storage::last_fetch_utc();
   if (!is_auto && now > 0 && last_fetch > 0 &&
       now - last_fetch < g_cfg.min_refresh_sec) {
@@ -264,23 +263,6 @@ void setup() {
     g_bar.left = std::string(msg::kAlreadyFresh) + "  " +
                  local_hhmm(last_ok, g_cfg.tz_offset_min);
     render::draw_status_bar(g_bar);
-    storage::save_budget(g_budget);
-    finish_and_power_off(now);
-  }
-
-  // 1回の取得で投げたいリクエスト数を見積もる
-  int want = 0;
-  for (const auto& c : g_comps) {
-    if (c.league_id > 0) ++want;             // fixtures
-    if (c.has_standings) ++want;             // standings
-  }
-  const Allowance allowance = allow(g_budget, g_cfg.budget, is_auto, want);
-  if (allowance.blocked) {
-    LOGW("budget blocked: %s (used=%d manual=%d)", allowance.reason,
-         g_budget.requests_used, g_budget.manual_fetches);
-    g_bar.left = std::string(msg::kQuotaReached);
-    render::draw_status_bar(g_bar);
-    storage::save_budget(g_budget);
     finish_and_power_off(now);
   }
 
@@ -291,99 +273,98 @@ void setup() {
     g_bar.left = std::string(msg::kFailedPrefix) + " " +
                  local_hhmm(last_ok, g_cfg.tz_offset_min);
     render::draw_status_bar(g_bar);
-    storage::save_budget(g_budget);
     finish_and_power_off(now > 0 ? now : rtc_now_utc());
   }
   const std::time_t synced = sync_time();
-  if (synced > 0) {
-    now = synced;
-    roll_over(g_budget, now);
-  }
+  if (synced > 0) now = synced;
 
-  // --- 取得 (§2.4 keep-alive) --------------------------------------------
+  // --- 取得 (§2.3, keep-alive + 7秒間隔) ---------------------------------
   net::KeepAliveClient http;
-  net::RatePacer pacer(g_cfg.budget.max_requests_per_minute);
+  net::RatePacer pacer(g_cfg.min_request_interval_ms);
   api::FetchStats stats;
-  std::time_t ref = now;
-  std::vector<Match> matches;
+  // 45日窓の全試合。画面表示にはこの一部を使い、結果列の集計には全部を使う。
+  std::vector<Match> window;
   std::vector<LeagueStandings> standings_now;
   bool any_success = false;
 
   if (!http.begin(api::kHost, api::kPort, g_ca_pem.c_str())) {
     LOGE("tls connect failed");
   } else {
-    // デモモードでは基準時刻とシーズンを設定値で置き換える (無料プラン対策)
-    int season = season_year_from_utc(now);
-    ref = now;
-    if (g_cfg.demo_mode()) {
-      int y = 0, mo = 0, d = 0;
-      if (sscanf(g_cfg.demo_date.c_str(), "%d-%d-%d", &y, &mo, &d) == 3) {
-        ref = make_utc(y, mo, d, 23, 59, 59);
-        season = g_cfg.demo_season;
-        LOGW("DEMO MODE: season=%d, window ends %s", season,
-             g_cfg.demo_date.c_str());
-      } else {
-        LOGE("demo_date is malformed: %s", g_cfg.demo_date.c_str());
-      }
-    }
-    LOGI("season=%d, budget allows %d requests", season, allowance.requests);
-
-    api::resolve_missing_league_ids(http, pacer, g_cfg, g_comps, season, stats);
+    LOGI("fetching %d competitions, %dms between requests",
+         (int)g_comps.size(), g_cfg.min_request_interval_ms);
 
     for (std::size_t i = 0; i < g_comps.size(); ++i) {
-      if (stats.rate_limited) break;
-      if (stats.requests >= allowance.requests) {
-        LOGW("request allowance exhausted before %s", g_comps[i].key.c_str());
+      if (stats.requests >= g_cfg.max_requests_per_wake) {
+        LOGW("per-wake request cap reached before %s", g_comps[i].key.c_str());
         break;
       }
       // 1競技のパースに失敗しても他の競技の処理を続行する (§3.2)
-      if (api::fetch_fixtures(http, pacer, g_cfg, g_comps[i],
-                              static_cast<int>(i), season, ref, matches,
-                              stats)) {
+      if (api::fetch_matches(http, pacer, g_cfg, g_comps[i],
+                             static_cast<int>(i), now, window, stats)) {
         any_success = true;
+      } else if (stats.rate_limited) {
+        // サーバの指示ぶん待ってから次に進む。無視して再送しない (§2.5-3)。
+        pacer.back_off(0);
+        stats.rate_limited = false;
       }
     }
 
-    // 試合のあったリーグの standings だけを取る (§6.5)
+    // 新しい試合が検出された競技会だけ standings を取る (§2.3b)。
+    // 試合がなければ順位は動かないのでキャッシュで足りる。
     for (std::size_t i = 0; i < g_comps.size(); ++i) {
-      if (stats.rate_limited) break;
       if (!g_comps[i].has_standings) continue;
-      if (stats.requests >= allowance.requests) break;
+      if (stats.requests >= g_cfg.max_requests_per_wake) break;
       const bool played = std::any_of(
-          matches.begin(), matches.end(),
-          [i](const Match& m) { return m.comp_index == static_cast<int>(i); });
+          window.begin(), window.end(), [i, now, this_cfg = &g_cfg](const Match& m) {
+            return m.comp_index == static_cast<int>(i) &&
+                   m.kickoff_utc >=
+                       now - static_cast<std::time_t>(
+                                 this_cfg->display_window_hours) * 3600;
+          });
       if (!played) continue;
       LeagueStandings ls;
       if (api::fetch_standings(http, pacer, g_cfg, g_comps[i],
-                               static_cast<int>(i), season, ls, stats)) {
+                               static_cast<int>(i), ls, stats)) {
         standings_now.push_back(ls);
+      } else if (stats.rate_limited) {
+        pacer.back_off(0);
+        stats.rate_limited = false;
       }
     }
     http.end();
   }
 
-  record(g_budget, g_cfg.budget, is_auto, stats.requests, stats.daily_remaining);
-  storage::save_budget(g_budget);
   storage::set_last_fetch_utc(now);
-  LOGI("fetch: %d req, %d http err, %d api err, %d parse err, %d matches, "
-       "paced %lums",
-       stats.requests, stats.http_errors, stats.api_errors, stats.parse_errors,
-       stats.matches, pacer.waited_ms());
-  if (stats.daily_remaining >= 0) {
-    LOGI("api daily remaining: %d", stats.daily_remaining);
-  }
+  LOGI("fetch: %d req, %d http err, %d parse err, %d matches in window, "
+       "paced %lums, minute_remaining=%d",
+       stats.requests, stats.http_errors, stats.parse_errors, stats.matches,
+       pacer.waited_ms(), stats.minute_remaining);
 
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
-  if (!any_success || matches.empty()) {
+  // 画面に載せるのは直近 display_window_hours ぶんだけ (§2.3a)。
+  const std::time_t display_cutoff =
+      now - static_cast<std::time_t>(g_cfg.display_window_hours) * 3600;
+  std::vector<Match> recent;
+  for (const auto& m : window) {
+    if (m.kickoff_utc >= display_cutoff) recent.push_back(m);
+  }
+  LOGI("display window: %d of %d matches", (int)recent.size(),
+       (int)window.size());
+
+  if (!any_success || recent.empty()) {
     storage::set_consecutive_failures(storage::consecutive_failures() + 1);
     LOGW("no usable data -> keep previous screen");
-    // プラン制限は設定で直せる問題なので、通信失敗と区別して表示する。
-    g_bar.left = stats.plan_error
-                     ? std::string(msg::kPlanError)
-                     : std::string(msg::kFailedPrefix) + " " +
-                           local_hhmm(last_ok, g_cfg.tz_offset_min);
+    // 原因が分かる表示にする。通信失敗と設定ミスは直し方が違う。
+    if (stats.auth_error || stats.forbidden_comp) {
+      g_bar.left = std::string(msg::kAuthError);
+    } else if (stats.rate_limited) {
+      g_bar.left = std::string(msg::kRateLimited);
+    } else {
+      g_bar.left = std::string(msg::kFailedPrefix) + " " +
+                   local_hhmm(last_ok, g_cfg.tz_offset_min);
+    }
     render::draw_status_bar(g_bar);
     finish_and_power_off(now);
   }
@@ -403,9 +384,16 @@ void setup() {
     if (!have) pool.current.push_back(prev);
   }
 
+  // 45日窓の全試合から結果列を組み立てる (§2.4)。
+  // 画面に出す試合だけで作ると連勝が数えられない。
+  FormTable forms;
+  forms.build(window);
+  LOGI("form table: %d teams from %d matches", (int)forms.size(),
+       (int)window.size());
+
   std::vector<long> seen;
   storage::load_seen_fixtures(seen);
-  const std::vector<Entry> entries = build_entries(matches, pool, seen);
+  const std::vector<Entry> entries = build_entries(recent, pool, forms, seen);
 
   int with_fact = 0;
   for (const auto& e : entries) {

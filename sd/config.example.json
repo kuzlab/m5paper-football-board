@@ -1,25 +1,26 @@
 {
   "_comment": "このファイルを config.json にリネームして microSD 直下に置く。config.json は絶対にコミットしないこと (§7.1)",
+  "_token_comment": "football-data.org のトークン。https://www.football-data.org/client/register で氏名とメールだけで取得できる",
 
   "wifi_ssid": "YOUR_SSID",
   "wifi_password": "YOUR_PASSWORD",
-  "apisports_key": "YOUR_API_SPORTS_KEY",
+  "football_data_token": "YOUR_FOOTBALL_DATA_TOKEN",
 
   "daily_wake_local": "07:00",
   "tz_offset_min": 540,
 
+  "_window_comment": "display_window_hours は画面に載せる範囲、form_window_days は連勝・連敗の集計範囲 (§2.3a)",
+  "display_window_hours": 72,
+  "form_window_days": 45,
+
   "min_refresh_sec": 600,
-  "fetch_window_hours": 72,
   "low_battery_volt": 3.30,
   "max_consecutive_failures": 5,
   "log_retention_days": 14,
 
-  "_budget_comment": "無料プランは 100 req/日 かつ 10 req/分。auto_reserve_requests は翌朝の自動更新のために取り置く分",
-  "max_requests_per_day": 90,
-  "auto_reserve_requests": 13,
-  "max_fetch_per_day": 5,
-  "max_requests_per_wake": 20,
-  "max_requests_per_minute": 10,
+  "_rate_comment": "無料枠は10リクエスト/分、日次上限なし。7秒間隔で約8.5req/分に抑える (§2.5)",
+  "min_request_interval_ms": 7000,
+  "max_requests_per_wake": 12,
 
   "thresholds": {
     "win_streak_min": 2,
@@ -28,7 +29,7 @@
     "big_win_diff": 4,
     "upset_rank_gap": 8,
     "rank_change_min": 2,
-    "_form_comment": "API-FOOTBALL の form は 新しい→古い の順で直近5試合ぶん (2026-08-30 実測)",
-    "form_latest_at_end": false
+    "_form_comment": "結果列は FormTable が日付昇順で積むので末尾が最新 (§2.4)",
+    "form_latest_at_end": true
   }
 }

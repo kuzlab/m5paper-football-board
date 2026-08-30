@@ -20,15 +20,16 @@ std::string fact_text(const Fact& f);
 constexpr const char* kRefreshHint    = "更新 → 側面ボタン";
 constexpr const char* kUpdating       = "更新中…";
 constexpr const char* kAlreadyFresh   = "更新済み";
-constexpr const char* kQuotaReached   = "本日の取得上限に達しました";
 constexpr const char* kUpdatedPrefix  = "更新";
 constexpr const char* kFailedPrefix   = "失敗";
 constexpr const char* kLowBattery     = "電池残量低下";
 constexpr const char* kFontError      = "FONT ERR";
 constexpr const char* kSdConfigError  = "SD CONFIG ERROR";
 constexpr const char* kWifiError      = "Wi-Fi 接続失敗";
-// API がプラン制限を返した (無料プランは現行シーズン非対応)
-constexpr const char* kPlanError      = "APIプラン制限";
+// トークン不正、または競技会が契約プランに含まれない (401 / 403)
+constexpr const char* kAuthError      = "APIトークンエラー";
+// 429。サーバの指示に従って待った結果、取得しきれなかった
+constexpr const char* kRateLimited    = "レート制限中";
 
 // 溢れ表示 (§5.2)。"ほか 6試合"
 std::string overflow_text(int remaining);

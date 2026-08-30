@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/form.h"
 #include "core/model.h"
 
 namespace fb {
@@ -45,11 +46,9 @@ struct FactThresholds {
   int rank_change_min = 2;
   int giant_killing_big_rank = 4;   // 敗者がこの順位以内なら「大金星」
   int giant_killing_mid_rank = 10;  // ここまでなら「格上撃破」
-  // form 文字列の向き。実データで確認済み (2026-08-30):
-  //   Liverpool 2024 の直近5試合は 古い→新しい で "WLDLD"、
-  //   standings の form は "DLDLW"。つまり form は 新しい→古い。
-  // また form は直近5試合ぶんに切り詰められている (played=38 でも5文字)。
-  bool form_latest_at_end = false;
+  // 結果列の向き。FormTable が日付昇順で積むので末尾が最新 (§2.4)。
+  // API の form 文字列に依存しなくなったため、向きは我々が決められる。
+  bool form_latest_at_end = true;
 };
 
 // form 末尾からの連続数。latest_at_end=false なら先頭から数える。
@@ -62,6 +61,7 @@ char latest_result(const std::string& form, bool latest_at_end);
 // 1試合について、表示すべきファクトを最大1件返す (§4.2)。
 // ファクトが無ければ type == FACT_NONE を返す。無理に何か作らない。
 Fact compute_fact(const Match& m, const StandingsPool& pool,
+                  const FormTable& forms,
                   const std::vector<Competition>& comps,
                   const FactThresholds& th);
 

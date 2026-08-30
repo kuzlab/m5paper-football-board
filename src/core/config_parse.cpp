@@ -44,7 +44,7 @@ bool parse_config(const char* json, std::size_t len, AppConfig& out,
 
   assign_str_if(doc["wifi_ssid"], out.wifi_ssid);
   assign_str_if(doc["wifi_password"], out.wifi_password);
-  assign_str_if(doc["apisports_key"], out.apisports_key);
+  assign_str_if(doc["football_data_token"], out.football_data_token);
 
   if (!doc["daily_wake_local"].isNull()) {
     if (!parse_hhmm(doc["daily_wake_local"], &out.daily_wake_hour,
@@ -56,19 +56,15 @@ bool parse_config(const char* json, std::size_t len, AppConfig& out,
 
   assign_if(doc["tz_offset_min"], out.tz_offset_min);
   assign_if(doc["min_refresh_sec"], out.min_refresh_sec);
-  assign_if(doc["fetch_window_hours"], out.fetch_window_hours);
+  assign_if(doc["display_window_hours"], out.display_window_hours);
+  assign_if(doc["form_window_days"], out.form_window_days);
   assign_if(doc["low_battery_volt"], out.low_battery_volt);
   assign_if(doc["max_consecutive_failures"], out.max_consecutive_failures);
   assign_if(doc["log_retention_days"], out.log_retention_days);
-  assign_if(doc["demo_season"], out.demo_season);
-  assign_str_if(doc["demo_date"], out.demo_date);
 
-  // 予算 (§2.3)
-  assign_if(doc["max_fetch_per_day"], out.budget.max_manual_fetches_per_day);
-  assign_if(doc["max_requests_per_day"], out.budget.max_requests_per_day);
-  assign_if(doc["auto_reserve_requests"], out.budget.auto_reserve_requests);
-  assign_if(doc["max_requests_per_wake"], out.budget.max_requests_per_wake);
-  assign_if(doc["max_requests_per_minute"], out.budget.max_requests_per_minute);
+  // レート制限 (§2.5)
+  assign_if(doc["min_request_interval_ms"], out.min_request_interval_ms);
+  assign_if(doc["max_requests_per_wake"], out.max_requests_per_wake);
 
   // ファクト閾値 (§4.1)
   JsonVariantConst th = doc["thresholds"];
@@ -86,8 +82,8 @@ bool parse_config(const char* json, std::size_t len, AppConfig& out,
     err = "wifi_ssid is empty";
     return false;
   }
-  if (out.apisports_key.empty()) {
-    err = "apisports_key is empty";
+  if (out.football_data_token.empty()) {
+    err = "football_data_token is empty";
     return false;
   }
   return true;
@@ -112,7 +108,7 @@ bool parse_competitions(const char* json, std::size_t len,
     Competition c;
     assign_str_if(o["key"], c.key);
     assign_str_if(o["display"], c.display);
-    assign_if(o["league_id"], c.league_id);
+    assign_str_if(o["code"], c.code);
     assign_if(o["priority"], c.priority);
     assign_if(o["has_standings"], c.has_standings);
     assign_if(o["is_cup"], c.is_cup);
@@ -130,7 +126,7 @@ bool parse_competitions(const char* json, std::size_t len,
       if (z.from > 0 && z.to >= z.from) c.zones.push_back(z);
     }
 
-    if (c.key.empty()) continue;
+    if (c.key.empty() || c.code.empty()) continue;
     if (c.display.empty()) c.display = c.key;
     out.push_back(c);
   }
@@ -174,7 +170,7 @@ bool parse_standings_cache(const char* json, std::size_t len,
       r.rank = row[1];
       r.played = row[2];
       r.points = row[3];
-      r.form = row[4].as<const char*>() ? row[4].as<const char*>() : "";
+      r.api_form = row[4].as<const char*>() ? row[4].as<const char*>() : "";
       if (row.size() >= 6 && row[5].as<const char*>())
         r.team_name = row[5].as<const char*>();
       ls.rows.push_back(r);
@@ -201,33 +197,10 @@ std::string serialize_standings_cache(const std::vector<LeagueStandings>& in,
       a.add(r.rank);
       a.add(r.played);
       a.add(r.points);
-      a.add(r.form);
+      a.add(r.api_form);
       a.add(r.team_name);
     }
   }
-  std::string out;
-  serializeJson(doc, out);
-  return out;
-}
-
-bool parse_league_ids(const char* json, std::size_t len, LeagueIdCache& out) {
-  JsonDocument doc;
-  if (deserializeJson(doc, json, len)) return false;
-  if (doc["season"].isNull()) return false;
-  out.season = doc["season"];
-  out.ids.clear();
-  JsonObjectConst ids = doc["ids"];
-  for (JsonPairConst kv : ids) {
-    out.ids.emplace_back(kv.key().c_str(), kv.value().as<int>());
-  }
-  return !out.ids.empty();
-}
-
-std::string serialize_league_ids(const LeagueIdCache& in) {
-  JsonDocument doc;
-  doc["season"] = in.season;
-  JsonObject ids = doc["ids"].to<JsonObject>();
-  for (const auto& kv : in.ids) ids[kv.first] = kv.second;
   std::string out;
   serializeJson(doc, out);
   return out;
