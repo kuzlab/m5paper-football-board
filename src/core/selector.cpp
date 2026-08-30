@@ -103,17 +103,27 @@ RenderPlan build_plan(const std::vector<Entry>& entries,
 }
 
 std::uint32_t plan_hash(const RenderPlan& plan) {
-  // FNV-1a。描画される文字列だけを混ぜる。y 座標は内容が同じなら同じになる。
   std::uint32_t h = 2166136261u;
-  auto mix = [&h](const std::string& s) {
-    for (unsigned char c : s) {
-      h ^= c;
-      h *= 16777619u;
-    }
-    h ^= 0xFF;
+  auto mix_byte = [&h](unsigned char c) {
+    h ^= c;
     h *= 16777619u;
   };
+  auto mix = [&mix_byte](const std::string& s) {
+    for (unsigned char c : s) mix_byte(c);
+    mix_byte(0xFF);
+  };
+  auto mix_int = [&mix_byte](std::uint32_t v) {
+    for (int i = 0; i < 4; ++i) mix_byte((v >> (i * 8)) & 0xFF);
+  };
+
+  // 描画コードの版。見た目だけが変わる修正でも再描画させる。
+  mix_int(kRenderVersion);
+
   for (const auto& r : plan.rows) {
+    // y 座標も混ぜる。行高が変われば同じ文字列でも見た目が変わるため、
+    // フォント差し替えやレイアウト調整が自動で反映される。
+    mix_int(static_cast<std::uint32_t>(r.y));
+    mix_byte(r.kind == PlanRow::kHeading ? 'H' : 'M');
     mix(r.kind == PlanRow::kHeading ? r.heading : r.home);
     if (r.kind == PlanRow::kMatch) {
       mix(r.score);
@@ -121,6 +131,7 @@ std::uint32_t plan_hash(const RenderPlan& plan) {
       mix(r.fact);
     }
   }
+  mix_int(static_cast<std::uint32_t>(plan.overflow_y));
   mix(msg::overflow_text(plan.overflow_count));
   return h;
 }

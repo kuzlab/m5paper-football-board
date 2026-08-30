@@ -74,7 +74,13 @@ RenderPlan build_plan(const std::vector<Entry>& entries,
                       const std::vector<Competition>& comps,
                       const LayoutMetrics& lm, const Measures& me);
 
+// 描画コードを変えたら上げる。文字内容が同じでも見た目が変わる修正
+// (フォントの太さ、罫線の位置、白フラッシュの有無など) を反映させるため。
+// これが無いと、描画を直しても内容が変わるまで画面が古いままになる。
+constexpr std::uint32_t kRenderVersion = 3;
+
 // 描画内容のハッシュ (§5.5)。前回と同一なら描画をスキップする。
+// 文字列だけでなく行の y 座標と kRenderVersion も混ぜる。
 std::uint32_t plan_hash(const RenderPlan& plan);
 
 // "2 - 1"

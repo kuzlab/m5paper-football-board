@@ -197,20 +197,38 @@ bool KeepAliveClient::request(const char* path, const char* token,
     // 接続が切れていた可能性がある。1度だけ張り直して再送する。
     client_.stop();
     if (!ensure_connected()) return false;
-    if (client_.print(req.c_str()) != static_cast<int>(req.size())) return false;
+    if (client_.print(req.c_str()) != static_cast<int>(req.size())) {
+      client_.stop();  // 中途半端に書けた接続は使い回さない
+      return false;
+    }
   }
 
+  // ここから先で失敗したら、必ず接続を捨てること。
+  // リクエストは既に送信済みなので、ソケットには未読のレスポンスが
+  // 残っている可能性がある。それを放置して false を返すと、次の
+  // リクエストが古いレスポンスを読んでしまい、以降すべてが壊れる。
+  // 1競技の失敗で他を止めないためには接続の再作成が要る (§3.2)。
   std::string line;
-  if (!read_line(client_, line, 15000)) return false;
+  if (!read_line(client_, line, 15000)) {
+    client_.stop();
+    return false;
+  }
   // "HTTP/1.1 200 OK"
   {
     const std::size_t sp = line.find(' ');
-    if (sp == std::string::npos) return false;
+    if (sp == std::string::npos) {
+      client_.stop();
+      return false;
+    }
     res.status = atoi(line.c_str() + sp + 1);
   }
 
+  bool headers_done = false;
   while (read_line(client_, line, 15000)) {
-    if (line.empty()) break;  // ヘッダ終わり
+    if (line.empty()) {  // ヘッダ終わり
+      headers_done = true;
+      break;
+    }
     const std::size_t colon = line.find(':');
     if (colon == std::string::npos) continue;
     const std::string name = lower(line.substr(0, colon));
@@ -230,6 +248,11 @@ bool KeepAliveClient::request(const char* path, const char* token,
                name == "x-requestcounter-reset") {
       res.retry_after_sec = atoi(value.c_str());
     }
+  }
+  if (!headers_done) {
+    // ヘッダを読み切る前に切れた。接続を捨てて次に持ち越さない。
+    client_.stop();
+    return false;
   }
 
   body.attach(&client_, res.content_length, res.chunked, 8000);

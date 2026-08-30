@@ -192,9 +192,15 @@ bool needs_ghost_clear() {
 
 void draw_status_bar(const StatusBar& sb) {
   // 部分書き換え。押されてから1秒以内に「更新中…」を出すため (§6.3)。
+  //
+  // 電源ラッチ方式では起床がコールドブートなので、EPD のフレームバッファ
+  // (RAM) は真っ白で始まる。パネルには前回の絵が残っているが RAM には無い。
+  // ここで display() を引数なしで呼ぶとフレームバッファ全体が押し出され、
+  // 固定エリア以外が白で塗り潰されて試合一覧が消える (§6.2-1)。
+  // 押し出す領域を固定エリアだけに限定すること。
   M5.Display.setEpdMode(m5gfx::epd_mode_t::epd_fast);
   draw_status_contents(sb);
-  M5.Display.display();
+  M5.Display.display(0, 0, g_lm.screen_w, kStatusH);
   storage::set_partial_refresh_count(storage::partial_refresh_count() + 1);
 }
 
@@ -204,12 +210,15 @@ void draw_full(const RenderPlan& plan, const StatusBar& sb) {
 
   // 白フラッシュ。部分書き換えを重ねた後の面は中間調が残っており、
   // 白で塗るだけでは真っ白に戻らない (背景がグレーに見える原因)。
-  // 一度黒で塗ってから白に戻すと、パネルが全画素を駆動して素の白になる。
+  // 一度黒で塗ってパネルの全画素を駆動する。
+  //
+  // 押し出しはこの1回と、内容を描き切った後の1回だけにする。
+  // 白で塗って押してから内容を描くと、その間に電源が落ちた場合に
+  // 白紙のまま残ってしまう。§8.1 の「前回の画面をそのまま残す」に反する。
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.display();
-  M5.Display.fillScreen(TFT_WHITE);
-  M5.Display.display();
 
+  M5.Display.fillScreen(TFT_WHITE);
   draw_status_contents(sb);
 
   // 28px の要素をまとめて描く。フォントの入れ替えを2回に抑えるため

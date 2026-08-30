@@ -238,6 +238,20 @@ void test_columns_are_truncated_independently() {
   TEST_ASSERT_EQUAL_STRING("3 - 2", row.score.c_str());
 }
 
+void test_plan_hash_changes_with_layout() {
+  // 行高が変われば同じ内容でもハッシュが変わること。
+  // これが無いと、描画を直しても内容が変わるまで画面が更新されない。
+  auto comps = make_comps();
+  std::vector<Entry> v = {make_entry(1, "Arsenal", "Chelsea", 2, 1, 100, 1)};
+  LayoutMetrics tight;
+  LayoutMetrics loose = tight;
+  loose.row_h += 8;
+  loose.heading_h += 16;
+  const auto a = plan_hash(build_plan(v, comps, tight, make_measures()));
+  const auto b = plan_hash(build_plan(v, comps, loose, make_measures()));
+  TEST_ASSERT_NOT_EQUAL(a, b);
+}
+
 void test_plan_hash_changes_with_content() {
   auto comps = make_comps();
   LayoutMetrics lm;
@@ -283,5 +297,6 @@ int main(int, char**) {
   RUN_TEST(test_no_overflow_when_everything_fits);
   RUN_TEST(test_columns_are_truncated_independently);
   RUN_TEST(test_plan_hash_changes_with_content);
+  RUN_TEST(test_plan_hash_changes_with_layout);
   return UNITY_END();
 }
