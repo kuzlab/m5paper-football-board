@@ -25,7 +25,7 @@
 ## 動作に必要なもの
 
 - M5Paper (v1.1)
-- microSD カード (FAT32)
+- microSD カード — **必ず FAT32**。後述の注意を参照
 - API-FOOTBALL (API-SPORTS) のアカウント — 無料プランで動く
 - Wi-Fi (2.4GHz)
 
@@ -47,6 +47,20 @@ microSD 直下/
 ├── cache/               # 自動生成
 └── logs/                # 自動生成
 ```
+
+> **exFAT のカードは使えません。** ESP32 の FatFs は FAT16/FAT32 しか
+> 読めませんが、macOS は 64GB 以上のカードを既定で exFAT にします。
+> exFAT のまま挿すと起動ログに
+> `f_mount failed: (13) There is no valid FAT volume` が出ます。
+>
+> ```bash
+> diskutil list external                                  # ディスク番号を確認
+> diskutil eraseDisk FAT32 M5PAPER MBRFormat /dev/diskN   # 中身は全消去される
+> ```
+>
+> 32GB 以下のカードなら確実です。なお、カード自体と通信できていない場合は
+> 別のエラー (`Card Failed! cmd: 0x00` / `(3) The physical drive cannot work`)
+> になるので、切り分けの目印になります。
 
 **`config.json` はリポジトリにコミットしないこと。** Wi-Fi パスワードと API
 キーが入ります。`.gitignore` に登録済みです。
