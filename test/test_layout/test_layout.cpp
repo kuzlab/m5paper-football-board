@@ -103,7 +103,7 @@ void test_long_german_name_is_truncated_with_ellipsis() {
 void test_truncation_is_by_pixels_not_characters() {
   // 全角7文字 (=196px) と半角14文字 (=196px) が同じ幅で切られる。
   // 文字数で判定していたらここが壊れる。
-  const std::string wide = truncate_to_width("首位浮上首位浮上首位浮上", 200, measure_name);
+  const std::string wide = truncate_to_width("順位順位順位順位順位順位順位", 200, measure_name);
   const std::string narrow = truncate_to_width("abcdefghijklmnopqrst", 200, measure_name);
   TEST_ASSERT_TRUE(measure_name(wide) <= 200);
   TEST_ASSERT_TRUE(measure_name(narrow) <= 200);
@@ -143,9 +143,9 @@ void test_cyrillic_becomes_question_marks_not_garbage() {
 }
 
 void test_japanese_is_kept() {
+  // UI は英語だが、日本語に差し替えたときのために畳み込みの挙動は固定しておく。
   TEST_ASSERT_EQUAL_STRING("開幕3連勝", fold_unsupported("開幕3連勝").c_str());
-  TEST_ASSERT_EQUAL_STRING("更新 → 側面ボタン",
-                           fold_unsupported("更新 → 側面ボタン").c_str());
+  TEST_ASSERT_EQUAL_STRING("→ ℃ …", fold_unsupported("→ ℃ …").c_str());
 }
 
 // --- 並び替え -----------------------------------------------------------

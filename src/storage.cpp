@@ -50,6 +50,9 @@ bool ensure_dir(const char* path) {
 bool read_file(const char* path, std::string& out, std::size_t max_bytes) {
   out.clear();
   if (!g_sd_ok) return false;
+  // 初回起動ではキャッシュ類が存在しないのが正常。SD.open に無いパスを
+  // 渡すと VFS がエラーを吐くので、先に存在を確かめてノイズを抑える。
+  if (!SD.exists(path)) return false;
   File f = SD.open(path, FILE_READ);
   if (!f) return false;
   const std::size_t n = f.size();
@@ -71,6 +74,7 @@ bool write_file_atomic(const char* path, const std::string& data) {
   if (!g_sd_ok) return false;
   // 書き込み中に電源が落ちても元ファイルを壊さないよう、一時ファイル経由。
   std::string tmp = std::string(path) + ".tmp";
+  if (SD.exists(tmp.c_str())) SD.remove(tmp.c_str());
   File f = SD.open(tmp.c_str(), FILE_WRITE);
   if (!f) return false;
   const std::size_t written =
@@ -81,7 +85,7 @@ bool write_file_atomic(const char* path, const std::string& data) {
     SD.remove(tmp.c_str());
     return false;
   }
-  SD.remove(path);
+  if (SD.exists(path)) SD.remove(path);
   return SD.rename(tmp.c_str(), path);
 }
 

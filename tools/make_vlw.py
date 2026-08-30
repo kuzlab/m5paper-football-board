@@ -62,13 +62,11 @@ def build_charset(src_dir):
     chars += EXTRA
     for name in ("messages.cpp", "messages.h"):
         chars += japanese_from_messages(os.path.join(src_dir, "core", name))
-    # 重複除去して安定した順序にする
-    seen, out = set(), []
-    for c in chars:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
+    # M5GFX (LovyanGFX) は VLW のグリフ表を std::lower_bound で引くため、
+    # コードポイントの昇順に並んでいないと二分探索が破綻し、
+    # 順序が崩れた位置より後ろのグリフが一切引けなくなる。
+    # ここのソートを外すと画面から文字が消える。
+    return sorted(set(chars), key=ord)
 
 
 # --- VLW 書き出し -------------------------------------------------------
@@ -177,6 +175,9 @@ def main():
             print(f"  ERROR: {len(missing)} chars not found in any font: "
                   f"{''.join(missing)}", file=sys.stderr)
             failed = True
+        # 念のため書き出し直前にも昇順を確認する。
+        cps = [g["cp"] for g in glyphs]
+        assert cps == sorted(cps), "glyph table must be sorted by codepoint"
         out = os.path.join(args.out, f"{args.name}_{size}.vlw")
         write_vlw(out, glyphs, size, ascent, descent, f"{args.name}{size}")
         print(f"  wrote {out}: {len(glyphs)} glyphs "

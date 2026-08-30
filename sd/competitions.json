@@ -1,8 +1,7 @@
 {
-  "_comment": "順位帯の定義 (§4.1)。zones は配列の先頭から評価し、最初にマッチした帯を採用する。狭い帯を先に書くこと。negative=true は「入りたくない帯」で、文言が 転落 / 脱出 になる。",
+  "_comment": "順位帯の定義 (§4.1)。zones は配列の先頭から評価し、最初にマッチした帯を採用する。狭い帯を先に書くこと。negative=true は「入りたくない帯」で、文言が Down into / Out of になる。帯の名前はそのまま画面に出るので、UI 言語 (英語) に合わせること。",
   "_code_comment": "code は football-data.org の競技会コード。URL パスにそのまま使う。無料枠(12コンペティション)に含まれるものだけを列挙している。",
   "_scope_comment": "Europa League / FA Cup / DFB-Pokal / Copa del Rey は無料枠に無く、有料プラン(12競技のまま)でも解決しない。SPEC §2.1 の判断により4競技で確定。",
-
   "competitions": [
     {
       "key": "champions_league",
@@ -14,10 +13,27 @@
       "is_domestic": false,
       "total_teams": 36,
       "zones": [
-        { "name": "首位",   "from": 1,  "to": 1 },
-        { "name": "突破圏", "from": 1,  "to": 8 },
-        { "name": "PO圏",   "from": 9,  "to": 24 },
-        { "name": "敗退圏", "from": 25, "to": 36, "negative": true }
+        {
+          "name": "Top",
+          "from": 1,
+          "to": 1
+        },
+        {
+          "name": "Last 16",
+          "from": 1,
+          "to": 8
+        },
+        {
+          "name": "Play-off",
+          "from": 9,
+          "to": 24
+        },
+        {
+          "name": "Out",
+          "from": 25,
+          "to": 36,
+          "negative": true
+        }
       ]
     },
     {
@@ -30,9 +46,22 @@
       "is_domestic": true,
       "total_teams": 20,
       "zones": [
-        { "name": "首位",   "from": 1,  "to": 1 },
-        { "name": "CL圏",   "from": 1,  "to": 5 },
-        { "name": "降格圏", "from": 18, "to": 20, "negative": true }
+        {
+          "name": "Top",
+          "from": 1,
+          "to": 1
+        },
+        {
+          "name": "UCL",
+          "from": 1,
+          "to": 5
+        },
+        {
+          "name": "Relegation",
+          "from": 18,
+          "to": 20,
+          "negative": true
+        }
       ]
     },
     {
@@ -45,10 +74,28 @@
       "is_domestic": true,
       "total_teams": 18,
       "zones": [
-        { "name": "首位",   "from": 1,  "to": 1 },
-        { "name": "CL圏",   "from": 1,  "to": 4 },
-        { "name": "降格圏", "from": 17, "to": 18, "negative": true },
-        { "name": "入替戦", "from": 16, "to": 16, "negative": true }
+        {
+          "name": "Top",
+          "from": 1,
+          "to": 1
+        },
+        {
+          "name": "UCL",
+          "from": 1,
+          "to": 4
+        },
+        {
+          "name": "Relegation",
+          "from": 17,
+          "to": 18,
+          "negative": true
+        },
+        {
+          "name": "Play-off",
+          "from": 16,
+          "to": 16,
+          "negative": true
+        }
       ]
     },
     {
@@ -61,9 +108,22 @@
       "is_domestic": true,
       "total_teams": 20,
       "zones": [
-        { "name": "首位",   "from": 1,  "to": 1 },
-        { "name": "CL圏",   "from": 1,  "to": 5 },
-        { "name": "降格圏", "from": 18, "to": 20, "negative": true }
+        {
+          "name": "Top",
+          "from": 1,
+          "to": 1
+        },
+        {
+          "name": "UCL",
+          "from": 1,
+          "to": 5
+        },
+        {
+          "name": "Relegation",
+          "from": 18,
+          "to": 20,
+          "negative": true
+        }
       ]
     }
   ]

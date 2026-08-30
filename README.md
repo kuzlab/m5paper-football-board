@@ -8,16 +8,16 @@
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ 更新 08/29 07:00   26.4℃ 58%  72%     更新 → 側面ボタン      │
+│ Updated 08/30 07:05   25.1℃ 69%  100%   Refresh: side button│
 ├────────────────────────────────────────────────────────────┤
 │ ■ Premier League                                           │
-│   Arsenal            2 - 1  Chelsea          開幕3連勝       │
-│   Liverpool          0 - 3  Everton          番狂わせ        │
+│   Arsenal            2 - 1  Chelsea       Won all 3         │
+│   Liverpool          0 - 3  Everton       Upset             │
 │ ■ Bundesliga                                               │
-│   Bayern München     4 - 0  Union Berlin     首位           │
+│   M'gladbach         4 - 0  Union Berlin  3 wins in a row   │
 │ ■ LaLiga                                                   │
-│   Alavés             0 - 2  Girona           降格圏転落      │
-│                                          ほか 6試合          │
+│   Alavés             0 - 2  Girona        Down into Releg…  │
+│                                              +6 more        │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -103,9 +103,15 @@ TLS 接続に失敗するようになったら、証明書が更新された可�
 このスクリプトを再実行して `ca.pem` を差し替えてください。**ファームウェアの
 再書き込みは不要です。**
 
-### 3. 日本語フォントを作る
+### 3. フォントを作る
 
 SIL OFL のフォントを用意して、必要な文字だけに絞った VLW を生成します。
+
+> **⚠️ VLW のグリフ表はコードポイント昇順でなければなりません。**
+> M5GFX (LovyanGFX) は `std::lower_bound` で二分探索するため、順序が崩れた
+> 位置より後ろのグリフが**一切引けなくなります**。画面から文字が消えても
+> エラーは出ないので気づきにくい罠です。`make_vlw.py` はソートしたうえで
+> 書き出し直前にも assert で検証します。
 
 > **日本語フォント1本では足りません。** Noto Sans JP は Latin Extended-A を
 > **98文字欠いており** (`ş` `č` `ğ` `ı` など)、`Beşiktaş` や `Crvena zvezda`
@@ -125,9 +131,9 @@ python3 tools/make_vlw.py \
 ```
 
 ```
-charset: 391 glyphs
-  wrote sd/fonts/board_20.vlw: 391 glyphs (98 from fallback fonts),  82 KB
-  wrote sd/fonts/board_28.vlw: 391 glyphs (98 from fallback fonts), 144 KB
+charset: 321 glyphs
+  wrote sd/fonts/board_20.vlw: 321 glyphs (98 from fallback fonts),  57 KB
+  wrote sd/fonts/board_28.vlw: 321 glyphs (98 from fallback fonts), 100 KB
 ```
 
 `--strict` は1文字でも欠けたら失敗します。欠字したまま気づかず焼くのを防ぐため、
@@ -138,11 +144,11 @@ charset: 391 glyphs
 - ASCII 全域
 - **Latin-1 Supplement** — `Mönchengladbach` `Alavés`
 - **Latin Extended-A** — `Beşiktaş` `Kraków` `Ferencváros`
-- `src/core/messages.cpp` から自動抽出した日本語
+- `src/core/messages.cpp` から自動抽出した非 ASCII 文字（UI を日本語化した
+  場合はその漢字・かなも自動で含まれます）
 
 > **`src/core/messages.cpp` の文言テンプレートを変更したら、`make_vlw.py` を
-> 再実行すること。** 文字リストはこのファイルから自動抽出されるため、
-> 新しい漢字を追加してフォントを作り直さないと `?` になります。
+> 再実行すること。** 文字リストはこのファイルから自動抽出されます。
 
 Latin Extended-A の外側 (キリル文字など) は `fold_unsupported()` が `?` や
 ASCII 近似に畳みます。豆腐や描画崩れにはなりません。
@@ -240,6 +246,15 @@ football-data.org の無料枠では順位表の `form` に依存できません
 `test/test_form/` がそれを固定しています。
 
 順位表の `form` が来ているかどうかは起動ログに出しますが、**判定には使いません。**
+
+### 表示言語は英語
+
+チーム名・競技会名が原語表記なので、UI も英語で揃えています。表示文字列は
+`src/core/messages.h/.cpp` と `sd/competitions.json` の順位帯名の2箇所に
+集約してあります。
+
+日本語化する場合はこの2箇所を書き換えて `make_vlw.py` を再実行すれば動きます
+（文字リストは `messages.cpp` から自動抽出されるため、手作業は不要です）。
 
 ### 連勝は「首位」より優先する
 

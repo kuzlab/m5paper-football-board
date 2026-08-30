@@ -35,9 +35,9 @@ std::vector<Competition> make_comps() {
   pl.total_teams = 20;
   // 狭い帯を先に置く (決定事項5)。
   pl.zones = {
-      {"首位", 1, 1, false},
-      {"CL圏", 1, 4, false},
-      {"降格圏", 18, 20, true},
+      {"Top", 1, 1, false},
+      {"UCL", 1, 4, false},
+      {"Relegation", 18, 20, true},
   };
   c.push_back(pl);
 
@@ -170,7 +170,7 @@ void test_opening_streak() {
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_OPENING_STREAK, f.type);
   TEST_ASSERT_EQUAL_INT(3, f.count);
-  TEST_ASSERT_EQUAL_STRING("開幕3連勝", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Won all 3", msg::fact_text(f).c_str());
 }
 
 void test_opening_streak_needs_window_to_cover_season() {
@@ -189,7 +189,7 @@ void test_opening_streak_needs_window_to_cover_season() {
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_NOT_EQUAL(FACT_OPENING_STREAK, f.type);
   TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
-  TEST_ASSERT_EQUAL_STRING("5連勝", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("5 wins in a row", msg::fact_text(f).c_str());
 }
 
 void test_streak_beats_top_of_table() {
@@ -206,7 +206,7 @@ void test_streak_beats_top_of_table() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
-  TEST_ASSERT_EQUAL_STRING("5連勝", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("5 wins in a row", msg::fact_text(f).c_str());
 }
 
 void test_short_form_early_season_no_streak() {
@@ -238,7 +238,7 @@ void test_win_streak() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_WIN_STREAK, f.type);
-  TEST_ASSERT_EQUAL_STRING("3連勝", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("3 wins in a row", msg::fact_text(f).c_str());
 }
 
 void test_streak_broken() {
@@ -254,7 +254,7 @@ void test_streak_broken() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_STREAK_BROKEN, f.type);
-  TEST_ASSERT_EQUAL_STRING("連敗脱出", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Losing run ends", msg::fact_text(f).c_str());
 }
 
 void test_draw_does_not_break_into_win_streak() {
@@ -284,7 +284,7 @@ void test_team_missing_from_form_window() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_TOP_OF_TABLE, f.type);
-  TEST_ASSERT_EQUAL_STRING("首位", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Top of the table", msg::fact_text(f).c_str());
 }
 
 // --- 順位帯の境界 (17位と18位) ------------------------------------------
@@ -322,7 +322,7 @@ void test_zone_boundary_18_falls_in() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 0, 2));
   TEST_ASSERT_EQUAL_INT(FACT_ZONE_ENTER, f.type);
-  TEST_ASSERT_EQUAL_STRING("降格圏転落", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Down into Relegation", msg::fact_text(f).c_str());
 }
 
 void test_zone_enter_positive_uses_narrowest_zone() {
@@ -342,7 +342,7 @@ void test_zone_enter_positive_uses_narrowest_zone() {
 
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 2, 0));
   TEST_ASSERT_EQUAL_INT(FACT_ZONE_ENTER, f.type);
-  TEST_ASSERT_EQUAL_STRING("首位浮上", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Up into Top", msg::fact_text(f).c_str());
 }
 
 // --- 前回データが無い初回 -----------------------------------------------
@@ -375,7 +375,7 @@ void test_big_win_without_standings() {
   s.finish();
   const Fact f = s.fact_of(match(0, 99, 98, 5, 0));
   TEST_ASSERT_EQUAL_INT(FACT_BIG_WIN, f.type);
-  TEST_ASSERT_EQUAL_STRING("大勝", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Big win", msg::fact_text(f).c_str());
 }
 
 void test_upset_requires_same_table() {
@@ -390,7 +390,7 @@ void test_upset_requires_same_table() {
   // 15位が2位に勝った → 順位差13
   const Fact f = s.fact_of(match(0, kHomeTeam, kAwayTeam, 0, 3));
   TEST_ASSERT_EQUAL_INT(FACT_UPSET, f.type);
-  TEST_ASSERT_EQUAL_STRING("番狂わせ", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Upset", msg::fact_text(f).c_str());
 }
 
 // --- ジャイアントキリング -----------------------------------------------
@@ -408,7 +408,7 @@ void test_giant_killing_big_scalp() {
   // comp 1 = カップ戦。勝者 777 は順位表に居ない = 下部リーグ。
   const Fact f = s.fact_of(match(1, 777, 10, 2, 1));
   TEST_ASSERT_EQUAL_INT(FACT_GIANT_KILLING, f.type);
-  TEST_ASSERT_EQUAL_STRING("大金星", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Huge upset", msg::fact_text(f).c_str());
 }
 
 void test_giant_killing_mid_table_scalp() {
@@ -421,7 +421,7 @@ void test_giant_killing_mid_table_scalp() {
 
   const Fact f = s.fact_of(match(1, 777, 10, 1, 0));
   TEST_ASSERT_EQUAL_INT(FACT_GIANT_KILLING, f.type);
-  TEST_ASSERT_EQUAL_STRING("格上撃破", msg::fact_text(f).c_str());
+  TEST_ASSERT_EQUAL_STRING("Beat a top side", msg::fact_text(f).c_str());
 }
 
 void test_no_giant_killing_when_favourite_wins() {
