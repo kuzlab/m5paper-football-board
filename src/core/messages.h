@@ -27,6 +27,8 @@ constexpr const char* kLowBattery     = "電池残量低下";
 constexpr const char* kFontError      = "FONT ERR";
 constexpr const char* kSdConfigError  = "SD CONFIG ERROR";
 constexpr const char* kWifiError      = "Wi-Fi 接続失敗";
+// API がプラン制限を返した (無料プランは現行シーズン非対応)
+constexpr const char* kPlanError      = "APIプラン制限";
 
 // 溢れ表示 (§5.2)。"ほか 6試合"
 std::string overflow_text(int remaining);

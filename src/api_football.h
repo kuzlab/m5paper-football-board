@@ -21,6 +21,8 @@ struct FetchStats {
   int parse_errors = 0;
   int matches = 0;
   int standings_rows = 0;
+  int api_errors = 0;          // HTTP 200 で errors が返った回数
+  bool plan_error = false;     // プランで許可されていない (シーズン/パラメータ)
   bool rate_limited = false;   // 429 を受けた (§2.3-4)
   int daily_remaining = -1;    // 最後に見たヘッダの値
   unsigned long paced_ms = 0;  // レート制限で待った時間

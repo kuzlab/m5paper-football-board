@@ -27,6 +27,13 @@ struct AppConfig {
   int max_consecutive_failures = 5;  // 超えたら起床間隔を延ばす (§8.1)
   int log_retention_days = 14;    // 古いログを消す (§8.2)
 
+  // 開発用。API-FOOTBALL の無料プランは現行シーズンにアクセスできないため
+  // (2022-2024 のみ)、過去シーズンのデータで動作確認するための設定。
+  // 有料プランに切り替えたら両方とも外すこと。
+  int demo_season = 0;        // 0 = 実時刻からシーズンを判定する
+  std::string demo_date;      // "YYYY-MM-DD"。空なら実時刻を使う
+  bool demo_mode() const { return demo_season > 0 && !demo_date.empty(); }
+
   BudgetPolicy budget;
   FactThresholds thresholds;
 

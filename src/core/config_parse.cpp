@@ -60,6 +60,8 @@ bool parse_config(const char* json, std::size_t len, AppConfig& out,
   assign_if(doc["low_battery_volt"], out.low_battery_volt);
   assign_if(doc["max_consecutive_failures"], out.max_consecutive_failures);
   assign_if(doc["log_retention_days"], out.log_retention_days);
+  assign_if(doc["demo_season"], out.demo_season);
+  assign_str_if(doc["demo_date"], out.demo_date);
 
   // 予算 (§2.3)
   assign_if(doc["max_fetch_per_day"], out.budget.max_manual_fetches_per_day);

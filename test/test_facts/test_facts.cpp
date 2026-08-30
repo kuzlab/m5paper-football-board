@@ -85,9 +85,21 @@ void test_trailing_run_latest_at_end() {
 }
 
 void test_trailing_run_latest_at_front() {
-  // form の向きが逆だった場合。実データで確認するまでどちらもテストする。
+  // API-FOOTBALL はこちら。実データで確認済み (2026-08-30):
+  //   Liverpool 2024 の直近5試合 (古い→新しい) は "WLDLD"、
+  //   standings の form は "DLDLW"。form は 新しい→古い。
   TEST_ASSERT_EQUAL_INT(4, trailing_run("WWWWL", 'W', false));
   TEST_ASSERT_EQUAL_INT(0, trailing_run("LWWWW", 'W', false));
+}
+
+void test_default_form_direction_matches_api_football() {
+  // 既定値が実データの向きから外れたら気づけるようにしておく。
+  const FactThresholds th;
+  TEST_ASSERT_FALSE(th.form_latest_at_end);
+  // 実データそのもの: Liverpool 2024 最終節は引き分けで、直前は敗戦。
+  TEST_ASSERT_EQUAL_INT('D', latest_result("DLDLW", th.form_latest_at_end));
+  TEST_ASSERT_EQUAL_INT(0, trailing_run("DLDLW", 'W', th.form_latest_at_end));
+  TEST_ASSERT_EQUAL_INT(1, trailing_run_not("DLDLW", 'L', th.form_latest_at_end));
 }
 
 void test_empty_form() {
@@ -110,6 +122,7 @@ void test_opening_streak() {
   pool.comps = &comps;
   LeagueStandings ls;
   ls.comp_index = 0;
+  // 全勝なので向きに依存しない。form 長 == played で開幕連勝と判定される。
   ls.rows.push_back(row(1, "Arsenal", 1, "WWW", 3));
   ls.rows.push_back(row(2, "Chelsea", 12, "LDL", 3));
   pool.current.push_back(ls);
@@ -142,8 +155,9 @@ void test_win_streak() {
   pool.comps = &comps;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Arsenal", 6, "LDWWW", 12));
-  ls.rows.push_back(row(2, "Chelsea", 9, "WLDDL", 12));
+  // form は新しい→古い。先頭3つが W なので3連勝。
+  ls.rows.push_back(row(1, "Arsenal", 6, "WWWDL", 12));
+  ls.rows.push_back(row(2, "Chelsea", 9, "LDDLW", 12));
   pool.current.push_back(ls);
 
   const Fact f = compute_fact(match(0, 1, 2, 2, 1), pool, comps, FactThresholds());
@@ -157,8 +171,9 @@ void test_streak_broken() {
   pool.comps = &comps;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Arsenal", 8, "WLLLW", 12));  // 3連敗のあと勝ち
-  ls.rows.push_back(row(2, "Chelsea", 9, "WWDDL", 12));
+  // 新しい→古い。最新が W で、その前が LLL なので連敗脱出。
+  ls.rows.push_back(row(1, "Arsenal", 8, "WLLLW", 12));
+  ls.rows.push_back(row(2, "Chelsea", 9, "LDDWW", 12));
   pool.current.push_back(ls);
 
   const Fact f = compute_fact(match(0, 1, 2, 1, 0), pool, comps, FactThresholds());
@@ -172,7 +187,7 @@ void test_draw_does_not_break_into_win_streak() {
   pool.comps = &comps;
   LeagueStandings ls;
   ls.comp_index = 0;
-  ls.rows.push_back(row(1, "Arsenal", 6, "WWWD", 12));  // 最新が D
+  ls.rows.push_back(row(1, "Arsenal", 6, "DWWW", 12));  // 最新 (先頭) が D
   ls.rows.push_back(row(2, "Chelsea", 7, "DDDD", 12));
   pool.current.push_back(ls);
 
@@ -388,6 +403,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_trailing_run_latest_at_end);
   RUN_TEST(test_trailing_run_latest_at_front);
+  RUN_TEST(test_default_form_direction_matches_api_football);
   RUN_TEST(test_empty_form);
   RUN_TEST(test_unbeaten_counts_draws);
   RUN_TEST(test_opening_streak);

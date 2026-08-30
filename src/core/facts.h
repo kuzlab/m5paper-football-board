@@ -45,8 +45,11 @@ struct FactThresholds {
   int rank_change_min = 2;
   int giant_killing_big_rank = 4;   // 敗者がこの順位以内なら「大金星」
   int giant_killing_mid_rank = 10;  // ここまでなら「格上撃破」
-  // form 文字列の向き。末尾が最新かどうかは実データで必ず確認する (§4.3)。
-  bool form_latest_at_end = true;
+  // form 文字列の向き。実データで確認済み (2026-08-30):
+  //   Liverpool 2024 の直近5試合は 古い→新しい で "WLDLD"、
+  //   standings の form は "DLDLW"。つまり form は 新しい→古い。
+  // また form は直近5試合ぶんに切り詰められている (played=38 でも5文字)。
+  bool form_latest_at_end = false;
 };
 
 // form 末尾からの連続数。latest_at_end=false なら先頭から数える。

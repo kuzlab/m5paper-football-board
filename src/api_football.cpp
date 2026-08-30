@@ -54,6 +54,26 @@ void note_rate_headers(const net::Response& res, FetchStats& stats) {
   if (res.daily_remaining >= 0) stats.daily_remaining = res.daily_remaining;
 }
 
+// API-FOOTBALL は HTTP 200 のまま errors を返す。
+//   {"errors":{"plan":"Free plans do not have access to this season..."},"results":0}
+// これを読まないと「プラン制限で0件」と「試合が無くて0件」を区別できない。
+// errors は正常時に空配列 [] 、異常時にオブジェクト {} で返る点に注意。
+bool report_api_errors(JsonVariantConst doc, const char* what,
+                       FetchStats& stats) {
+  JsonVariantConst errors = doc["errors"];
+  if (errors.isNull()) return false;
+  JsonObjectConst obj = errors.as<JsonObjectConst>();
+  if (obj.isNull() || obj.size() == 0) return false;  // [] は正常
+  for (JsonPairConst kv : obj) {
+    const char* v = kv.value().as<const char*>();
+    LOGE("%s: API error [%s] %s", what, kv.key().c_str(), v ? v : "?");
+    if (strcmp(kv.key().c_str(), "plan") == 0) stats.plan_error = true;
+    if (strcmp(kv.key().c_str(), "requests") == 0) stats.rate_limited = true;
+  }
+  ++stats.api_errors;
+  return true;
+}
+
 }  // namespace
 
 void install_psram_allocator() { /* JsonDocument 生成時に渡す方式 */ }
@@ -114,6 +134,8 @@ bool fetch_fixtures(net::KeepAliveClient& http, net::RatePacer& pacer,
 
   // フィルタ (§3.2)。フィールド名は実レスポンスで検証すること。
   JsonDocument filter(&g_alloc);
+  filter["errors"] = true;
+  filter["results"] = true;
   JsonObject fx = filter["response"][0].to<JsonObject>();
   fx["fixture"]["id"] = true;
   fx["fixture"]["date"] = true;
@@ -135,6 +157,7 @@ bool fetch_fixtures(net::KeepAliveClient& http, net::RatePacer& pacer,
     LOGE("fixtures %s: parse %s", comp.key.c_str(), err.c_str());
     return false;  // 1競技の失敗で他を止めない (§3.2)
   }
+  if (report_api_errors(doc, comp.key.c_str(), stats)) return false;
 
   const std::time_t cutoff = now_utc - cfg.fetch_window_hours * 3600;
   int added = 0;
@@ -203,6 +226,7 @@ bool fetch_standings(net::KeepAliveClient& http, net::RatePacer& pacer,
   // response[0].league.standings は「グループの配列の配列」。
   // CL/EL はリーグフェーズ中のみ存在し、ノックアウトに入ると空になる。
   JsonDocument filter(&g_alloc);
+  filter["errors"] = true;
   JsonObject st =
       filter["response"][0]["league"]["standings"][0][0].to<JsonObject>();
   st["rank"] = true;
@@ -222,6 +246,7 @@ bool fetch_standings(net::KeepAliveClient& http, net::RatePacer& pacer,
     LOGE("standings %s: parse %s", comp.key.c_str(), err.c_str());
     return false;
   }
+  if (report_api_errors(doc, comp.key.c_str(), stats)) return false;
 
   out.comp_index = comp_index;
   out.rows.clear();
@@ -281,6 +306,7 @@ bool resolve_missing_league_ids(net::KeepAliveClient& http,
     }
 
     JsonDocument filter(&g_alloc);
+    filter["errors"] = true;
     filter["response"][0]["league"]["id"] = true;
     filter["response"][0]["league"]["name"] = true;
     JsonDocument doc(&g_alloc);

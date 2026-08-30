@@ -304,6 +304,7 @@ void setup() {
   net::KeepAliveClient http;
   net::RatePacer pacer(g_cfg.budget.max_requests_per_minute);
   api::FetchStats stats;
+  std::time_t ref = now;
   std::vector<Match> matches;
   std::vector<LeagueStandings> standings_now;
   bool any_success = false;
@@ -311,7 +312,20 @@ void setup() {
   if (!http.begin(api::kHost, api::kPort, g_ca_pem.c_str())) {
     LOGE("tls connect failed");
   } else {
-    const int season = season_year_from_utc(now);
+    // デモモードでは基準時刻とシーズンを設定値で置き換える (無料プラン対策)
+    int season = season_year_from_utc(now);
+    ref = now;
+    if (g_cfg.demo_mode()) {
+      int y = 0, mo = 0, d = 0;
+      if (sscanf(g_cfg.demo_date.c_str(), "%d-%d-%d", &y, &mo, &d) == 3) {
+        ref = make_utc(y, mo, d, 23, 59, 59);
+        season = g_cfg.demo_season;
+        LOGW("DEMO MODE: season=%d, window ends %s", season,
+             g_cfg.demo_date.c_str());
+      } else {
+        LOGE("demo_date is malformed: %s", g_cfg.demo_date.c_str());
+      }
+    }
     LOGI("season=%d, budget allows %d requests", season, allowance.requests);
 
     api::resolve_missing_league_ids(http, pacer, g_cfg, g_comps, season, stats);
@@ -324,7 +338,7 @@ void setup() {
       }
       // 1競技のパースに失敗しても他の競技の処理を続行する (§3.2)
       if (api::fetch_fixtures(http, pacer, g_cfg, g_comps[i],
-                              static_cast<int>(i), season, now, matches,
+                              static_cast<int>(i), season, ref, matches,
                               stats)) {
         any_success = true;
       }
@@ -351,9 +365,10 @@ void setup() {
   record(g_budget, g_cfg.budget, is_auto, stats.requests, stats.daily_remaining);
   storage::save_budget(g_budget);
   storage::set_last_fetch_utc(now);
-  LOGI("fetch: %d req, %d http err, %d parse err, %d matches, paced %lums",
-       stats.requests, stats.http_errors, stats.parse_errors, stats.matches,
-       pacer.waited_ms());
+  LOGI("fetch: %d req, %d http err, %d api err, %d parse err, %d matches, "
+       "paced %lums",
+       stats.requests, stats.http_errors, stats.api_errors, stats.parse_errors,
+       stats.matches, pacer.waited_ms());
   if (stats.daily_remaining >= 0) {
     LOGI("api daily remaining: %d", stats.daily_remaining);
   }
@@ -364,8 +379,11 @@ void setup() {
   if (!any_success || matches.empty()) {
     storage::set_consecutive_failures(storage::consecutive_failures() + 1);
     LOGW("no usable data -> keep previous screen");
-    g_bar.left = std::string(msg::kFailedPrefix) + " " +
-                 local_hhmm(last_ok, g_cfg.tz_offset_min);
+    // プラン制限は設定で直せる問題なので、通信失敗と区別して表示する。
+    g_bar.left = stats.plan_error
+                     ? std::string(msg::kPlanError)
+                     : std::string(msg::kFailedPrefix) + " " +
+                           local_hhmm(last_ok, g_cfg.tz_offset_min);
     render::draw_status_bar(g_bar);
     finish_and_power_off(now);
   }

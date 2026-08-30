@@ -28,7 +28,7 @@
     "big_win_diff": 4,
     "upset_rank_gap": 8,
     "rank_change_min": 2,
-    "_form_comment": "form 文字列の末尾が最新かどうか。実データで必ず確認する (§4.3)",
-    "form_latest_at_end": true
+    "_form_comment": "API-FOOTBALL の form は 新しい→古い の順で直近5試合ぶん (2026-08-30 実測)",
+    "form_latest_at_end": false
   }
 }
