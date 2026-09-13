@@ -58,6 +58,7 @@ bool parse_config(const char* json, std::size_t len, AppConfig& out,
   assign_if(doc["min_refresh_sec"], out.min_refresh_sec);
   assign_if(doc["display_window_hours"], out.display_window_hours);
   assign_if(doc["form_window_days"], out.form_window_days);
+  assign_if(doc["fresh_hours"], out.fresh_hours);
   assign_if(doc["low_battery_volt"], out.low_battery_volt);
   assign_if(doc["max_consecutive_failures"], out.max_consecutive_failures);
   assign_if(doc["log_retention_days"], out.log_retention_days);

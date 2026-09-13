@@ -87,7 +87,6 @@ void sort_entries(std::vector<Entry>& entries,
                      const int pa = comp_priority(comps, a.match.comp_index);
                      const int pb = comp_priority(comps, b.match.comp_index);
                      if (pa != pb) return pa < pb;
-                     if (a.seen != b.seen) return !a.seen;  // 既出は後回し
                      if (a.match.kickoff_utc != b.match.kickoff_utc)
                        return a.match.kickoff_utc > b.match.kickoff_utc;
                      return a.match.fixture_id > b.match.fixture_id;

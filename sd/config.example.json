@@ -9,9 +9,10 @@
   "daily_wake_local": "07:00",
   "tz_offset_min": 540,
 
-  "_window_comment": "display_window_hours は画面に載せる範囲、form_window_days は連勝・連敗の集計範囲 (§2.3a)",
+  "_window_comment": "fresh_hours は結果が届いてから新着として出す時間。display_window_hours はキックオフがこれより古い試合を出さない上限。form_window_days は連勝・連敗の集計範囲",
   "display_window_hours": 72,
   "form_window_days": 45,
+  "fresh_hours": 20,
 
   "min_refresh_sec": 600,
   "low_battery_volt": 3.30,

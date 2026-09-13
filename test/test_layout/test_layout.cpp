@@ -264,23 +264,8 @@ void test_plan_hash_changes_with_content() {
   TEST_ASSERT_EQUAL_UINT32(ha, ha2);
 }
 
-void test_seen_matches_are_deprioritised_not_dropped() {
-  // 72時間ウィンドウの再掲。既出は同じ競技会内で後ろに回すが、捨てない。
-  auto comps = make_comps();
-  std::vector<Entry> v = {
-      make_entry(1, "Old", "Match", 1, 0, 5000, 1),   // 新しいが既出
-      make_entry(1, "New", "Match", 2, 0, 1000, 2),   // 古いが未見
-  };
-  v[0].seen = true;
-  sort_entries(v, comps);
-  TEST_ASSERT_EQUAL_STRING("New", v[0].match.home_name.c_str());
-  TEST_ASSERT_EQUAL_STRING("Old", v[1].match.home_name.c_str());
-  TEST_ASSERT_EQUAL_INT(2, static_cast<int>(v.size()));
-}
-
 int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_seen_matches_are_deprioritised_not_dropped);
   RUN_TEST(test_utf8_split_handles_multibyte);
   RUN_TEST(test_no_truncation_when_it_fits);
   RUN_TEST(test_long_german_name_is_truncated_with_ellipsis);

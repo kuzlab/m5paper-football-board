@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/config_parse.h"
+#include "core/freshness.h"
 #include "core/model.h"
 #include "core/selector.h"
 
@@ -55,9 +56,11 @@ bool save_standings(const std::vector<LeagueStandings>& in,
 bool load_plan(RenderPlan& out);
 bool save_plan(const RenderPlan& in);
 
-// --- 既出 fixture (再掲の優先度下げ用、§2.2 の72時間ウィンドウ) ---------
-bool load_seen_fixtures(std::vector<long>& out);
-bool save_seen_fixtures(const std::vector<long>& in, std::size_t max_keep = 120);
+// --- 新着判定の記録 -----------------------------------------------------
+// 試合ごとに「初めて完了を確認した時刻」。旧形式は記録を捨てて履歴なし扱い。
+// 欠損・破損は false を返す (エラーにはしない)。
+bool load_seen_log(SeenLog& out);
+bool save_seen_log(const SeenLog& in);
 
 }  // namespace storage
 }  // namespace fb

@@ -206,28 +206,16 @@ bool save_plan(const RenderPlan& in) {
   return write_file_atomic(kPlanPath, out);
 }
 
-// --- 既出 fixture -------------------------------------------------------
+// --- 新着判定の記録 ---
 
-bool load_seen_fixtures(std::vector<long>& out) {
-  out.clear();
+bool load_seen_log(SeenLog& out) {
   std::string json;
-  if (!read_file(kSeenPath, json, 8192)) return false;
-  JsonDocument doc;
-  if (deserializeJson(doc, json)) return false;
-  for (JsonVariantConst v : doc["ids"].as<JsonArrayConst>()) {
-    out.push_back(v.as<long>());
-  }
-  return true;
+  if (!read_file(kSeenPath, json, 16384)) return false;
+  return out.parse(json.c_str(), json.size());
 }
 
-bool save_seen_fixtures(const std::vector<long>& in, std::size_t max_keep) {
-  JsonDocument doc;
-  JsonArray a = doc["ids"].to<JsonArray>();
-  const std::size_t start = in.size() > max_keep ? in.size() - max_keep : 0;
-  for (std::size_t i = start; i < in.size(); ++i) a.add(in[i]);
-  std::string out;
-  serializeJson(doc, out);
-  return write_file_atomic(kSeenPath, out);
+bool save_seen_log(const SeenLog& in) {
+  return write_file_atomic(kSeenPath, in.serialize());
 }
 
 }  // namespace storage

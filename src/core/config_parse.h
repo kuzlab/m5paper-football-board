@@ -21,8 +21,11 @@ struct AppConfig {
   int tz_offset_min = 540;  // JST = UTC+9
 
   int min_refresh_sec = 600;      // 手動更新のクールダウン (§6.4)
-  int display_window_hours = 72;  // 画面に載せる範囲 (§2.3a)
+  int display_window_hours = 72;  // キックオフがこれより古い試合は出さない
   int form_window_days = 45;      // 結果列の集計範囲 (§2.3a)
+  // 初めて完了を確認してからこの時間内の試合だけを新着として出す。
+  // キックオフではなく「結果が届いた時刻」から数える (core/freshness.h)。
+  int fresh_hours = 20;
   float low_battery_volt = 3.30f; // これを下回ったら通信しない (§6.5)
   int max_consecutive_failures = 5;  // 超えたら起床間隔を延ばす (§8.1)
   int log_retention_days = 14;    // 古いログを消す (§8.2)

@@ -40,10 +40,6 @@ struct Measures {
 struct Entry {
   Match match;
   Fact fact;
-  // 取得範囲が72時間あるため、同じ試合が最大3日連続で候補に上がる (§2.2)。
-  // 既に表示した試合は除外せず優先度だけ下げる。試合が少ない日でも
-  // 画面が空にならないようにするため。
-  bool seen = false;
 };
 
 struct PlanRow {

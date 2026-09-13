@@ -25,6 +25,8 @@ constexpr const char* kRefreshHint    = "Refresh: side button";
 constexpr const char* kUpdating       = "Updating...";
 constexpr const char* kAlreadyFresh   = "Up to date";
 constexpr const char* kUpdatedPrefix  = "Updated";
+// 取得は成功したが新着が無い。前回の画面を維持していることを示す
+constexpr const char* kNoNewResults   = "No new results";
 constexpr const char* kFailedPrefix   = "Failed";
 constexpr const char* kLowBattery     = "Battery low";
 constexpr const char* kFontError      = "FONT ERR";

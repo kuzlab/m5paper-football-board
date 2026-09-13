@@ -14,6 +14,7 @@
 #include "core/datetime.h"
 #include "core/facts.h"
 #include "core/form.h"
+#include "core/freshness.h"
 #include "core/messages.h"
 #include "core/selector.h"
 #include "football_data.h"
@@ -164,15 +165,13 @@ std::time_t sync_time() {
 // 取得したデータからファクトを算出し、画面用の Entry を組む (§4, §5.2)。
 std::vector<Entry> build_entries(const std::vector<Match>& matches,
                                  const StandingsPool& pool,
-                                 const FormTable& forms,
-                                 const std::vector<long>& seen) {
+                                 const FormTable& forms) {
   std::vector<Entry> out;
   out.reserve(matches.size());
   for (const auto& m : matches) {
     Entry e;
     e.match = m;
     e.fact = compute_fact(m, pool, forms, g_comps, g_cfg.thresholds);
-    e.seen = std::find(seen.begin(), seen.end(), m.fixture_id) != seen.end();
     out.push_back(e);
   }
   sort_entries(out, g_comps);
@@ -296,6 +295,25 @@ void setup() {
   std::vector<LeagueStandings> standings_now;
   bool any_success = false;
 
+  // 新着判定 (core/freshness.h)。1日以上前の結果は出さず、新着が無ければ
+  // 前回の画面を維持する。「1日」は結果が届いた時刻から数える。
+  SeenLog seen_log;
+  if (!storage::load_seen_log(seen_log)) {
+    // 履歴が無い (初回起動・SD 差し替え・破損)。この回だけ、結果は
+    // キックオフの2時間後に届いていたとみなす。そうしないと45日分の
+    // 試合がすべて「今初めて見た」になり、数日前の試合が新着に出る。
+    seen_log.assume_arrival_at_kickoff();
+  }
+  const bool seen_rebuilt = seen_log.bootstrapping();
+  FreshnessPolicy fresh_policy;
+  fresh_policy.fresh_hours = g_cfg.fresh_hours;
+  fresh_policy.kickoff_cap_hours = g_cfg.display_window_hours;
+  // 記録の保持期間はキックオフ上限より長くする。捨てた試合が再観測されても
+  // キックオフ上限で弾かれるので、再び新着になることはない。
+  const int seen_keep_hours = std::max(168, g_cfg.display_window_hours + 24);
+  std::vector<Match> display;
+  bool showing_fallback = false;
+
   if (!http.begin(api::kHost, api::kPort, g_ca_pem.c_str())) {
     LOGE("tls connect failed");
   } else {
@@ -318,19 +336,25 @@ void setup() {
       }
     }
 
-    // 新しい試合が検出された競技会だけ standings を取る (§2.3b)。
-    // 試合がなければ順位は動かないのでキャッシュで足りる。
+    // 今回の観測を記録してから、表示する試合を決める。
+    seen_log.observe(window, now);
+    display = select_fresh(window, seen_log, now, fresh_policy);
+    if (display.empty() && g_last_plan.rows.empty()) {
+      // 新着が無く、維持すべき前回画面も無い (初回起動など)。
+      // 真っ白よりは直近の結果を出すほうがよい。
+      display = select_recent(window, now, fresh_policy);
+      showing_fallback = true;
+    }
+
+    // 画面に出す試合がある競技会だけ standings を取る (§2.3b)。
+    // 新着が無い日は順位表のリクエストが1本も飛ばない。
     for (std::size_t i = 0; i < g_comps.size(); ++i) {
       if (!g_comps[i].has_standings) continue;
       if (stats.requests >= g_cfg.max_requests_per_wake) break;
-      const bool played = std::any_of(
-          window.begin(), window.end(), [i, now, this_cfg = &g_cfg](const Match& m) {
-            return m.comp_index == static_cast<int>(i) &&
-                   m.kickoff_utc >=
-                       now - static_cast<std::time_t>(
-                                 this_cfg->display_window_hours) * 3600;
-          });
-      if (!played) continue;
+      const bool shown = std::any_of(
+          display.begin(), display.end(),
+          [i](const Match& m) { return m.comp_index == static_cast<int>(i); });
+      if (!shown) continue;
       LeagueStandings ls;
       if (api::fetch_standings(http, pacer, g_cfg, g_comps[i],
                                static_cast<int>(i), ls, stats)) {
@@ -352,17 +376,12 @@ void setup() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
-  // 画面に載せるのは直近 display_window_hours ぶんだけ (§2.3a)。
-  const std::time_t display_cutoff =
-      now - static_cast<std::time_t>(g_cfg.display_window_hours) * 3600;
-  std::vector<Match> recent;
-  for (const auto& m : window) {
-    if (m.kickoff_utc >= display_cutoff) recent.push_back(m);
-  }
-  LOGI("display window: %d of %d matches", (int)recent.size(),
-       (int)window.size());
+  LOGI("to show: %d (%s), %d in window, %d seen records%s", (int)display.size(),
+       showing_fallback ? "fallback: recent" : "new results",
+       (int)window.size(), (int)seen_log.size(),
+       seen_rebuilt ? " (history rebuilt, arrival assumed at kickoff+2h)" : "");
 
-  if (!any_success || recent.empty()) {
+  if (!any_success) {
     storage::set_consecutive_failures(storage::consecutive_failures() + 1);
     LOGW("no usable data -> keep previous screen");
     // 原因が分かる表示にする。通信失敗と設定ミスは直し方が違う。
@@ -375,6 +394,21 @@ void setup() {
                    local_hhmm(last_ok, g_cfg.tz_offset_min);
     }
     render::draw_status_bar(g_bar, g_last_plan);
+    finish_and_power_off(now);
+  }
+
+  // 新着が無い: 前回の画面をそのまま維持する。取得自体は成功しているので
+  // 失敗扱いにはしない。固定エリアで「止まっている」のではなく
+  // 「新着が無い」ことが分かるようにする。
+  if (display.empty()) {
+    LOGI("no new results -> keep previous screen");
+    seen_log.prune(now, seen_keep_hours);
+    storage::save_seen_log(seen_log);
+    g_bar.left = std::string(msg::kNoNewResults) + " " +
+                 local_hhmm(now, g_cfg.tz_offset_min);
+    render::draw_status_bar(g_bar, g_last_plan);
+    storage::set_consecutive_failures(0);
+    storage::set_last_success_utc(now);
     finish_and_power_off(now);
   }
 
@@ -400,9 +434,7 @@ void setup() {
   LOGI("form table: %d teams from %d matches", (int)forms.size(),
        (int)window.size());
 
-  std::vector<long> seen;
-  storage::load_seen_fixtures(seen);
-  const std::vector<Entry> entries = build_entries(recent, pool, forms, seen);
+  const std::vector<Entry> entries = build_entries(display, pool, forms);
 
   int with_fact = 0;
   for (const auto& e : entries) {
@@ -413,6 +445,17 @@ void setup() {
   const RenderPlan plan =
       build_plan(entries, g_comps, render::metrics(), render::measures());
   const std::uint32_t hash = plan_hash(plan);
+
+  // 画面は手元から見えないので、何を描いたかをログに残す (§8.2)。
+  for (const auto& r : plan.rows) {
+    if (r.kind == PlanRow::kHeading) {
+      LOGI("  [%s]", r.heading.c_str());
+    } else {
+      LOGI("    %s %s %s | %s", r.home.c_str(), r.score.c_str(), r.away.c_str(),
+           r.fact.c_str());
+    }
+  }
+  if (plan.has_overflow()) LOGI("    +%d more", plan.overflow_count);
 
   // --- 描画 (§5.5) -------------------------------------------------------
   const bool same = (hash == storage::last_plan_hash());
@@ -436,12 +479,8 @@ void setup() {
   if (!standings_now.empty()) {
     storage::save_standings(standings_now, g_comps);
   }
-  for (const auto& e : entries) {
-    if (std::find(seen.begin(), seen.end(), e.match.fixture_id) == seen.end()) {
-      seen.push_back(e.match.fixture_id);
-    }
-  }
-  storage::save_seen_fixtures(seen);
+  seen_log.prune(now, seen_keep_hours);
+  storage::save_seen_log(seen_log);
   storage::set_consecutive_failures(0);
   storage::set_last_success_utc(now);
 
