@@ -17,6 +17,8 @@ struct StatusBar {
   float humidity_pct = 0.0f;
   bool env_ok = false;
   int battery_pct = 0;
+  // 残量低下。右端のヒントを「充電して」に差し替える (§6.5)。
+  bool battery_warn = false;
   bool font_error = false;  // VLW が読めなかった (§5.4)
 };
 

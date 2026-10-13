@@ -71,6 +71,11 @@ std::string local_hhmm(std::time_t utc, int tz_offset_min) {
 }
 
 // 次回アラームを設定して電源を切る。アラーム設定に失敗したら切らない (§6.2)。
+//
+// 既定のアラームは「毎日同時刻」で、日付を照合しない。そのため、次回ここに
+// 到達できなくても (起動直後のブラウンアウトなど) 翌日また起きられる。
+// 2026-09-22 は電池が弱った状態で起床に失敗し、アラームが再設定されないまま
+// 二度と起きなくなった。日付を照合するのは起床間隔を延ばすときだけにする。
 [[noreturn]] void finish_and_power_off(std::time_t now_utc) {
   int skip_days = 0;
   const int fails = storage::consecutive_failures();
@@ -80,30 +85,51 @@ std::string local_hhmm(std::time_t utc, int tz_offset_min) {
     LOGW("backoff: %d consecutive failures -> skip %d day(s)", fails, skip_days);
   }
 
-  const std::time_t alarm =
-      power::next_daily_alarm_utc(now_utc, g_cfg.daily_wake_hour,
-                                  g_cfg.daily_wake_min, g_cfg.tz_offset_min,
-                                  skip_days);
-  bool alarm_ok = power::set_alarm_utc(alarm);
-  if (!alarm_ok) {
-    // 1度だけ再試行する。それでも駄目なら電源を切らずに残す。
-    delay(200);
-    alarm_ok = power::set_alarm_utc(alarm);
+  std::time_t scheduled = 0;
+  bool alarm_ok = false;
+  for (int attempt = 0; attempt < 2 && !alarm_ok; ++attempt) {
+    if (attempt > 0) delay(200);  // 1度だけ再試行する
+    if (skip_days > 0 && now_utc > 0) {
+      scheduled = power::next_daily_alarm_utc(
+          now_utc, g_cfg.daily_wake_hour, g_cfg.daily_wake_min,
+          g_cfg.tz_offset_min, skip_days);
+      alarm_ok = power::set_alarm_utc(scheduled, /*match_day=*/true);
+    } else if (now_utc <= 0) {
+      // 時刻が分からない (電池切れ後の初回で SNTP も失敗)。絶対時刻では
+      // 設定できないので、RTC の進み分だけを頼りに再試行する。
+      // ただし電池が弱っているときに1時間おきに起きると使い切ってしまう。
+      scheduled = 0;
+      const bool weak = power::battery_volt() < g_cfg.warn_battery_volt;
+      alarm_ok = power::set_alarm_after_minutes(weak ? 24 * 60 : 60);
+    } else {
+      scheduled = power::next_daily_alarm_utc(now_utc, g_cfg.daily_wake_hour,
+                                              g_cfg.daily_wake_min,
+                                              g_cfg.tz_offset_min);
+      alarm_ok = power::set_alarm_utc(scheduled);
+    }
   }
+  // 起床理由の判定に使う。AF が消えていても予定時刻で自動起床と分かる。
+  storage::set_scheduled_alarm_utc(scheduled);
+  // ここまで来たら「正常に一巡した」。ブラウンアウト連鎖の数えをリセットする。
+  storage::set_boot_attempts(0);
 
   log::prune(g_cfg.log_retention_days, now_utc);
+  power::log_battery("end");
   LOGI("done in %lums, heap=%u, psram=%u", millis() - g_t0,
        (unsigned)ESP.getFreeHeap(), (unsigned)api::psram_free());
   log::flush();
 
+  // AF が立ったまま電源を切ると INT が張られ続け、電源が入り直す。
+  // 起床直後にも落としているが、念のためここでも確認する。
+  power::clear_alarm_flag();
   render::sleep_display();
 
   if (!alarm_ok) {
     // 電源を切ると二度と起きない。通電したまま残して人が気づけるようにする。
     LOGE("ALARM SET FAILED - staying powered on so the device can still wake");
     log::flush();
-    render::draw_fatal("RTC ALARM ERROR", "次回アラームを設定できませんでした",
-                       "電源を切らずに待機します");
+    render::draw_fatal("RTC ALARM ERROR", "Could not set the next wake alarm",
+                       "Staying powered on");
     while (true) delay(10000);
   }
   power::shutdown();
@@ -116,14 +142,23 @@ std::string local_hhmm(std::time_t utc, int tz_offset_min) {
   render::draw_fatal(msg::kSdConfigError, msg::kSdSetupHelp1,
                      msg::kSdSetupHelp2);
   log::flush();
-  // 既定値でアラームだけ設定して落とす。人が SD を直せば翌朝復帰する。
+  // 既定値でアラームだけ残して落とす。人が SD を直せば翌朝復帰する。
+  // 通電したまま待たせると電池を使い切り、RTC が時刻とアラームまで失う。
   const std::time_t now = rtc_now_utc();
-  if (now > 0 && power::set_alarm_utc(power::next_daily_alarm_utc(
-                     now, g_cfg.daily_wake_hour, g_cfg.daily_wake_min,
-                     g_cfg.tz_offset_min))) {
+  const bool armed =
+      now > 0 ? power::set_alarm_utc(power::next_daily_alarm_utc(
+                    now, g_cfg.daily_wake_hour, g_cfg.daily_wake_min,
+                    g_cfg.tz_offset_min))
+              : power::set_alarm_after_minutes(60);
+  if (armed) {
+    storage::set_scheduled_alarm_utc(0);
+    storage::set_boot_attempts(0);
+    log::flush();
     render::sleep_display();
     power::shutdown();
   }
+  LOGE("ALARM SET FAILED - staying powered on");
+  log::flush();
   while (true) delay(10000);
 }
 
@@ -182,22 +217,48 @@ std::vector<Entry> build_entries(const std::vector<Match>& matches,
 
 void setup() {
   g_t0 = millis();
+
+  // NVS は M5.begin() より先に開ける。EPD の初期化で電圧が落ちて再起動する
+  // 場合でも、起動回数だけは数えられるようにしておく。
+  storage::begin_nvs();
+  const int boot_attempt = storage::boot_attempts() + 1;
+  storage::set_boot_attempts(boot_attempt);
+
   auto cfg = M5.config();
+  // 既定の true では M5.begin() が BM8563 の 0x09-0x0C と 0x01 をゼロクリア
+  // する。起床理由の AF が毎回消えて全部「ボタン起動」に見えていた原因で、
+  // さらに武装済みのアラームも起動のたびに解除されてしまう (power.h 参照)。
+  cfg.disable_rtc_irq = false;
   M5.begin(cfg);
   Serial.begin(115200);
 
-  storage::begin_nvs();
-  const bool sd_ok = storage::begin_sd();
-
+  // アラームフラグ (AF) は立っている間 INT を張り続ける = 電源が入り続ける。
+  // 起床理由を読んだら、他の初期化より先に落とす。ここまで来る前に落ちると
+  // 再起動を繰り返すため、この区間は I2C だけで短く済ませる。
   std::time_t now = rtc_now_utc();
-  log::begin(now > 0 ? now : 1767225600);  // RTC 未設定なら仮の日付
-  LOGI("boot: sd=%d heap=%u psram=%u", (int)sd_ok, (unsigned)ESP.getFreeHeap(),
-       (unsigned)api::psram_free());
-
-  const power::WakeReason reason = power::wake_reason();
-  const bool is_auto = (reason == power::WakeReason::kRtcAlarm);
+  const power::WakeInfo wake =
+      power::wake_info(now, storage::scheduled_alarm_utc());
+  const bool is_auto = (wake.reason == power::WakeReason::kRtcAlarm);
   power::clear_alarm_flag();
-  LOGI("wake reason: %s", is_auto ? "RTC alarm (auto)" : "button (manual)");
+
+  const bool sd_ok = storage::begin_sd();
+  log::begin(now > 0 ? now : 1767225600);  // RTC 未設定なら仮の日付
+
+  LOGI("boot: reset=%s sd=%d attempt=%d heap=%u psram=%u", wake.reset_reason,
+       (int)sd_ok, boot_attempt, (unsigned)ESP.getFreeHeap(),
+       (unsigned)api::psram_free());
+  LOGI("wake reason: %s (AF=%d scheduled=%d control2=%02X)",
+       is_auto ? "RTC alarm (auto)" : "button (manual)", (int)wake.alarm_flag,
+       (int)wake.schedule_matched, wake.control2);
+  power::log_battery("boot");
+  if (now <= 0) {
+    // RTC が時刻を失っている = 電池が完全に切れた。アラームも失われている
+    // ので、SNTP で時刻を取り直すまで自動起床は当てにできない。
+    LOGW("RTC has lost its time (battery was fully drained?)");
+  }
+  // ここで必ず書き出す。これが無かったため 2026-09-22 のブラウンアウトは
+  // ログに1行も残らなかった。
+  log::flush();
 
   render::begin();
   const bool fonts = render::load_fonts();
@@ -233,6 +294,40 @@ void setup() {
   LOGI("config ok: %d competitions, wake %02d:%02d local",
        (int)g_comps.size(), g_cfg.daily_wake_hour, g_cfg.daily_wake_min);
 
+  // 通信も描画もする前に、次回アラームを先に武装しておく。この後どこで
+  // 落ちても翌日の定時には起きられる。最後に同じ値で上書きする。
+  // 2026-09-22 は、起床に失敗してアラームが再設定されないまま二度と
+  // 起きなくなった。武装を「一巡したあと」だけにしない。
+  if (now > 0) {
+    const std::time_t next = power::next_daily_alarm_utc(
+        now, g_cfg.daily_wake_hour, g_cfg.daily_wake_min, g_cfg.tz_offset_min);
+    if (power::set_alarm_utc(next)) storage::set_scheduled_alarm_utc(next);
+  }
+
+  // 電池の状態で3段に分ける (§6.5)。
+  //   critical: 通信しない。ここから先は電圧が落ちて落ちる危険が高い
+  //   warn:     更新は続けるが画面に「充電して」を出す
+  // 電池を使い切ると RTC が時刻とアラームまで失い、人が触るまで戻らない。
+  const float vbat = power::battery_volt();
+  const bool batt_critical = (vbat > 0.1f && vbat < g_cfg.low_battery_volt);
+  g_bar.battery_warn = (vbat > 0.1f && vbat < g_cfg.warn_battery_volt);
+
+  // 起動を繰り返していないか。電池が弱った状態でブラウンアウト再起動が
+  // 続くと、1日ぶんの電池を数十分で使い切る。2026-09-22 はこれで電池が
+  // 尽きた可能性が高い。
+  // 電圧が十分あるときは引き返さない。USB 給電中は powerOff() がラッチを
+  // 切れずブラウンアウトリセットになるため、ここが毎回成立してしまう。
+  if (boot_attempt >= 3 && g_bar.battery_warn) {
+    LOGE("boot attempt %d without a clean finish (reset=%s, %.3fV)"
+         " -> skip everything and wait for the next alarm",
+         boot_attempt, wake.reset_reason, vbat);
+    finish_and_power_off(now);
+  }
+  if (boot_attempt >= 3) {
+    LOGW("boot attempt %d without a clean finish (reset=%s) but %.3fV is"
+         " healthy -> continue", boot_attempt, wake.reset_reason, vbat);
+  }
+
   // --- 環境と固定エリア --------------------------------------------------
   const sht30::Reading env = sht30::measure();
   g_bar.env_ok = env.ok;
@@ -248,17 +343,17 @@ void setup() {
   const bool plan_restored = storage::load_plan(g_last_plan);
   LOGI("last plan: %s (%d rows)", plan_restored ? "restored" : "none",
        (int)g_last_plan.rows.size());
-  g_bar.left = std::string(msg::kUpdating);
   // 押されたら通信前に「Updating...」を出す (§6.3)。
+  // 電池が危ないときは最初から「Battery low」を出す。書き換えが一番
+  // 電流を食うので、この状況で2回押し出さない (§6.5)。
+  g_bar.left = std::string(batt_critical ? msg::kLowBattery : msg::kUpdating);
   render::draw_status_bar(g_bar, g_last_plan);
 
   // --- 電池チェック ------------------------------------------------------
-  const float vbat = power::battery_volt();
-  if (vbat > 0.1f && vbat < g_cfg.low_battery_volt) {
-    LOGW("battery low: %.2fV -> skip fetch", vbat);
-    g_bar.left = std::string(msg::kLowBattery);
-    render::draw_status_bar(g_bar, g_last_plan);
-    finish_and_power_off(now > 0 ? now : rtc_now_utc());
+  if (batt_critical) {
+    LOGW("battery low: %.3fV (%d%%) -> skip fetch", vbat,
+         power::battery_percent());
+    finish_and_power_off(now);
   }
 
   // --- クールダウン (§6.4) -----------------------------------------------
@@ -283,12 +378,13 @@ void setup() {
     render::draw_status_bar(g_bar, g_last_plan);
     finish_and_power_off(now > 0 ? now : rtc_now_utc());
   }
+  power::log_battery("wifi");
   const std::time_t synced = sync_time();
   if (synced > 0) now = synced;
 
-  // --- 取得 (§2.3, keep-alive + 7秒間隔) ---------------------------------
+  // --- 取得 (§2.3, keep-alive + レート制限内で連投) ----------------------
   net::KeepAliveClient http;
-  net::RatePacer pacer(g_cfg.min_request_interval_ms);
+  net::RatePacer pacer(g_cfg.max_requests_per_minute);
   api::FetchStats stats;
   // 45日窓の全試合。画面表示にはこの一部を使い、結果列の集計には全部を使う。
   std::vector<Match> window;
@@ -317,8 +413,8 @@ void setup() {
   if (!http.begin(api::kHost, api::kPort, g_ca_pem.c_str())) {
     LOGE("tls connect failed");
   } else {
-    LOGI("fetching %d competitions, %dms between requests",
-         (int)g_comps.size(), g_cfg.min_request_interval_ms);
+    LOGI("fetching %d competitions, up to %d requests per minute",
+         (int)g_comps.size(), g_cfg.max_requests_per_minute);
 
     for (std::size_t i = 0; i < g_comps.size(); ++i) {
       if (stats.requests >= g_cfg.max_requests_per_wake) {

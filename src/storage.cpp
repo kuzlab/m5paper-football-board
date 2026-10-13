@@ -129,6 +129,19 @@ void set_last_success_utc(std::time_t t) {
 
 // --- 前回順位表 ---------------------------------------------------------
 
+std::time_t scheduled_alarm_utc() {
+  return g_nvs_ok ? static_cast<std::time_t>(g_prefs.getLong64("alarm_at", 0)) : 0;
+}
+void set_scheduled_alarm_utc(std::time_t t) {
+  if (g_nvs_ok) g_prefs.putLong64("alarm_at", static_cast<int64_t>(t));
+}
+int boot_attempts() {
+  return g_nvs_ok ? g_prefs.getInt("boot_n", 0) : 0;
+}
+void set_boot_attempts(int n) {
+  if (g_nvs_ok) g_prefs.putInt("boot_n", n);
+}
+
 bool load_standings(const std::vector<Competition>& comps,
                     std::vector<LeagueStandings>& out) {
   std::string json;

@@ -15,12 +15,14 @@
   "fresh_hours": 20,
 
   "min_refresh_sec": 600,
-  "low_battery_volt": 3.30,
+  "_battery_comment": "残量% は (mV-3300)/8 の直線近似にすぎない。low_battery_volt を下回ったら通信しない。warn_battery_volt を下回ったら画面に充電を促す (§6.5)",
+  "low_battery_volt": 3.45,
+  "warn_battery_volt": 3.70,
   "max_consecutive_failures": 5,
   "log_retention_days": 14,
 
-  "_rate_comment": "無料枠は10リクエスト/分、日次上限なし。7秒間隔で約8.5req/分に抑える (§2.5)",
-  "min_request_interval_ms": 7000,
+  "_rate_comment": "無料枠は10リクエスト/分、日次上限なし。直近60秒の本数だけを見て、上限に当たらなければ待たない (§2.5)",
+  "max_requests_per_minute": 9,
   "max_requests_per_wake": 12,
 
   "thresholds": {

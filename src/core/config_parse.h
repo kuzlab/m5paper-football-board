@@ -26,12 +26,22 @@ struct AppConfig {
   // 初めて完了を確認してからこの時間内の試合だけを新着として出す。
   // キックオフではなく「結果が届いた時刻」から数える (core/freshness.h)。
   int fresh_hours = 20;
-  float low_battery_volt = 3.30f; // これを下回ったら通信しない (§6.5)
+  // これを下回ったら通信しない (§6.5)。M5Unified の残量表示は
+  // (mV-3300)/8 % なので、3.30V = 0% だった。残量0%まで粘ってから
+  // 諦める設定になっていて、実機は 2026-09-22 の起床でブラウンアウトし
+  // そのまま電池を使い切った。18% 相当で止める。
+  float low_battery_volt = 3.45f;
+  // これを下回ったら画面に「充電してください」を出す (まだ更新は続ける)。
+  // 電池が尽きると RTC も時刻とアラームを失い、人が触るまで復帰しない。
+  float warn_battery_volt = 3.70f;
   int max_consecutive_failures = 5;  // 超えたら起床間隔を延ばす (§8.1)
   int log_retention_days = 14;    // 古いログを消す (§8.2)
 
   // レート制限 (§2.5)。日次上限は無い。
-  int min_request_interval_ms = 7000;  // リクエスト間の最低ウェイト
+  // 直近60秒に許すリクエスト数 (無料枠 10 req/min に1本余裕を残す)。
+  // 旧 min_request_interval_ms (固定7秒間隔) は廃止した。7本しか投げない
+  // のに42秒待っていて、その間 Wi-Fi を最大電力で握っていた。
+  int max_requests_per_minute = 9;
   int max_requests_per_wake = 12;      // リトライ暴走の防止
 
   FactThresholds thresholds;

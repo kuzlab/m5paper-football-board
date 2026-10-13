@@ -9,6 +9,8 @@
 #include <Stream.h>
 #include <WiFiClientSecure.h>
 
+#include "core/rate_window.h"
+
 #include <cstdint>
 #include <string>
 
@@ -84,22 +86,20 @@ class KeepAliveClient {
 };
 
 // レート制限を守るためのペーサ (§2.5)。
-// 無料枠は 10 req/min。上限ぴったりを狙わず、リクエスト間に一定の
-// ウェイト (既定7秒 = 約8.5 req/min) を必ず入れる。
+// 無料枠は 10 req/min。1回の起床で投げるのは7本なので、本来1本も待つ
+// 必要がない。固定7秒間隔をやめ、直近60秒の本数だけを見る (core/rate_window.h)。
 // keep-alive 接続はウェイト中も維持したままにする (§2.6)。
 class RatePacer {
  public:
-  explicit RatePacer(int min_interval_ms) : interval_ms_(min_interval_ms) {}
-  // 前回のリクエストから interval_ms_ 経つまで待つ。初回は待たない。
+  explicit RatePacer(int max_per_minute) : win_(max_per_minute) {}
+  // 上限に当たっていれば待つ。通常は待たずにすぐ返る。
   void wait_turn();
   // 429 を受けたときに、サーバの指示ぶんだけ余分に待つ (§2.5-3)。
   void back_off(int retry_after_sec);
   unsigned long waited_ms() const { return waited_ms_; }
 
  private:
-  int interval_ms_;
-  unsigned long last_ms_ = 0;
-  bool started_ = false;
+  RateWindow win_;
   unsigned long waited_ms_ = 0;
 };
 

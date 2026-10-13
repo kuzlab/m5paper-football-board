@@ -29,6 +29,9 @@ constexpr const char* kUpdatedPrefix  = "Updated";
 constexpr const char* kNoNewResults   = "No new results";
 constexpr const char* kFailedPrefix   = "Failed";
 constexpr const char* kLowBattery     = "Battery low";
+// 残量が warn_battery_volt を下回った。更新はまだ続けるが、このまま
+// 使い切ると RTC も時刻とアラームを失い、人が触るまで復帰しなくなる。
+constexpr const char* kChargeNow      = "LOW BATTERY - CHARGE";
 constexpr const char* kFontError      = "FONT ERR";
 constexpr const char* kSdConfigError  = "SD CONFIG ERROR";
 constexpr const char* kWifiError      = "Wi-Fi failed";

@@ -43,6 +43,14 @@ std::time_t last_fetch_utc();
 void set_last_fetch_utc(std::time_t t);
 std::time_t last_success_utc();
 void set_last_success_utc(std::time_t t);
+// 次回アラームとして設定した時刻。起床理由の判定に使う (power::wake_info)。
+std::time_t scheduled_alarm_utc();
+void set_scheduled_alarm_utc(std::time_t t);
+// 「起動したが正常終了していない」回数。起動直後に +1 し、電源断の直前に
+// 0 に戻す。ブラウンアウトで再起動を繰り返すと増え続けるので、
+// それを見て通信も描画もせずに引き返す (電池を使い切らないため)。
+int boot_attempts();
+void set_boot_attempts(int n);
 
 // --- 前回順位表 (§2.5) --------------------------------------------------
 bool load_standings(const std::vector<Competition>& comps,

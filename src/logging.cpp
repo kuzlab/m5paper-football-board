@@ -38,6 +38,9 @@ void mask(std::string& s) {
   }
 }
 
+// 日付を逆算して消す範囲。起床が途切れてもこの日数ぶんは追いつける。
+constexpr int kPruneScanDays = 120;
+
 std::string date_string(std::time_t t) {
   std::tm tmv{};
   gmtime_r(&t, &tmv);
@@ -103,23 +106,29 @@ void flush() {
 
 void prune(int retention_days, std::time_t now_utc) {
   if (!storage::sd_ready() || retention_days <= 0) return;
-  File dir = SD.open(storage::kLogDir);
-  if (!dir) return;
-  const std::string cutoff =
-      date_string(now_utc - static_cast<std::time_t>(retention_days) * 86400);
-  std::vector<std::string> doomed;
-  for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
-    std::string name = f.name();
-    const std::size_t slash = name.find_last_of('/');
-    if (slash != std::string::npos) name = name.substr(slash + 1);
-    f.close();
-    // ファイル名が YYYY-MM-DD.log なので文字列比較で新旧が判定できる。
-    if (name.size() >= 10 && name.substr(0, 10) < cutoff) {
-      doomed.push_back(std::string(storage::kLogDir) + "/" + name);
+  // ディレクトリ列挙 (SD.open + openNextFile) では1件も消せていなかった。
+  // 2026-09-03 からの19日分が log_retention_days=14 のまま残り続けていた。
+  // ファイル名は日付そのものなので、列挙に頼らず日付を逆算して消す。
+  // 何をしたかログに残す。黙って効かない処理が一番たちが悪い。
+  const std::time_t cutoff =
+      now_utc - static_cast<std::time_t>(retention_days) * 86400;
+  int removed = 0;
+  for (int i = 0; i < kPruneScanDays; ++i) {
+    const std::string path = std::string(storage::kLogDir) + "/" +
+                             date_string(cutoff - static_cast<std::time_t>(i) * 86400) +
+                             ".log";
+    if (path == g_path) continue;  // 書き込み中のファイルは消さない
+    if (!SD.exists(path.c_str())) continue;
+    if (SD.remove(path.c_str())) {
+      ++removed;
+    } else {
+      write(kWarn, "log prune: cannot remove %s", path.c_str());
     }
   }
-  dir.close();
-  for (const auto& p : doomed) SD.remove(p.c_str());
+  if (removed > 0) {
+    write(kInfo, "log prune: removed %d file(s) older than %s", removed,
+          date_string(cutoff).c_str());
+  }
 }
 
 }  // namespace log

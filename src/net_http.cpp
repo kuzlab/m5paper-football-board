@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "logging.h"
+
 namespace fb {
 namespace net {
 namespace {
@@ -270,21 +272,14 @@ void KeepAliveClient::finish(BodyStream& body, const Response& res) {
 // --- RatePacer ----------------------------------------------------------
 
 void RatePacer::wait_turn() {
-  if (interval_ms_ <= 0) {
-    last_ms_ = millis();
-    started_ = true;
-    return;
+  const unsigned long wait = win_.wait_for(millis());
+  if (wait > 0) {
+    LOGI("rate: %d in the last minute -> wait %lums",
+         win_.in_window(millis()), wait);
+    waited_ms_ += wait;
+    delay(wait);
   }
-  if (started_) {
-    const unsigned long elapsed = millis() - last_ms_;
-    if (elapsed < static_cast<unsigned long>(interval_ms_)) {
-      const unsigned long wait = interval_ms_ - elapsed;
-      waited_ms_ += wait;
-      delay(wait);
-    }
-  }
-  last_ms_ = millis();
-  started_ = true;
+  win_.record(millis());
 }
 
 void RatePacer::back_off(int retry_after_sec) {
@@ -296,8 +291,7 @@ void RatePacer::back_off(int retry_after_sec) {
   if (wait > 90000UL) wait = 90000UL;  // 起床時間が青天井にならないよう上限
   waited_ms_ += wait;
   delay(wait);
-  last_ms_ = millis();
-  started_ = true;
+  win_.record(millis());
 }
 
 }  // namespace net

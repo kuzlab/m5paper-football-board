@@ -102,7 +102,9 @@ void draw_status_contents(const StatusBar& sb) {
   M5.Display.drawString(fold_unsupported(mid).c_str(), g_lm.screen_w / 2, cy);
 
   M5.Display.setTextDatum(middle_right);
-  const char* hint = sb.font_error ? msg::kFontError : msg::kRefreshHint;
+  const char* hint = sb.font_error  ? msg::kFontError
+                     : sb.battery_warn ? msg::kChargeNow
+                                       : msg::kRefreshHint;
   M5.Display.drawString(fold_unsupported(hint).c_str(), g_lm.screen_w - 24, cy);
   M5.Display.setTextDatum(top_left);
 }
