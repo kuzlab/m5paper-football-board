@@ -228,8 +228,13 @@ bool load_standings(const std::vector<Competition>& comps,
 
 bool save_standings(const std::vector<LeagueStandings>& in,
                     const std::vector<Competition>& comps) {
+  // 取得しなかったリーグの前回順位を落とさないよう、読み込んでから差し替える
+  // (merge_standings_cache のコメント参照)。
+  std::vector<LeagueStandings> merged;
+  load_standings(comps, merged);
+  merge_standings_cache(merged, in);
   return write_file_atomic(kStandingsPath,
-                           serialize_standings_cache(in, comps));
+                           serialize_standings_cache(merged, comps));
 }
 
 // --- 前回描画した画面 ---

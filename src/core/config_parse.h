@@ -67,4 +67,12 @@ bool parse_standings_cache(const char* json, std::size_t len,
 std::string serialize_standings_cache(const std::vector<LeagueStandings>& in,
                                       const std::vector<Competition>& comps);
 
+// 今回取得できたリーグだけを prev に差し替える。順位表は「新しい結果が
+// あったリーグ」の分しか取得しないため、丸ごと置き換えると次にそのリーグの
+// 結果が出た日に前回順位が無く、順位変動の事実が出なくなる
+// (2026-10-25 の実機で premier_league だけ取得した回に bundesliga と
+// laliga の前回順位が消えていた)。空の順位表では上書きしない。
+void merge_standings_cache(std::vector<LeagueStandings>& prev,
+                           const std::vector<LeagueStandings>& fresh);
+
 }  // namespace fb

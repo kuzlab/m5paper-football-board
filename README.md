@@ -203,8 +203,9 @@ native  test_fresh     PASSED
 native  test_rate      PASSED
 native  test_form      PASSED
 native  test_datetime  PASSED
+native  test_standings PASSED
 native  test_facts     PASSED
-78 test cases: 78 succeeded
+83 test cases: 83 succeeded
 ```
 
 ### 開発中に電源を切らせない
@@ -476,6 +477,18 @@ API への反映がその後になるためです。07:00 の起床に間に合�
 football-data.org はコード (`PL` / `BL1` / `PD` / `CL`) を URL パスに直接使うため、
 ID 解決のリクエストが不要です。
 
+### 前回順位は取得しなかったリーグも持ち越す
+
+順位表は「新しい結果があったリーグ」の分しか取得しません（リクエストを
+節約するため）。そのため保存時に `/cache/standings_prev.json` を丸ごと
+置き換えると、**次にそのリーグの結果が出た日に前回順位が無く、「Up N places」も
+昇降格ラインの出入りも出なくなります。** 連日同じリーグが更新されたときだけ
+順位変動が出る、という状態になっていました (2026-10-25 に実機で発覚。
+premier_league だけ取得した回で bundesliga と laliga の前回順位が消えていた)。
+
+`save_standings()` は読み込んでから取得できたリーグだけを差し替えます
+(`merge_standings_cache`)。0行だった順位表では上書きしません。
+
 ### 連続失敗時のバックオフ
 
 `max_consecutive_failures` (既定5) を超えたら、次回アラームを翌々日・
@@ -534,6 +547,7 @@ ID 解決のリクエストが不要です。
 │   ├── test_form/                 # 結果列の集計 (§2.4)
 │   ├── test_fresh/                # 新着判定 (結果が届いた時刻から数える)
 │   ├── test_rate/                 # レート制限の待ち時間 (§2.5)
+│   ├── test_standings/            # 前回順位の持ち越し (取得しなかったリーグ)
 │   ├── test_layout/               # 切り詰め / 溢れ / グリフ畳み込み
 │   └── test_datetime/             # 45日窓の年またぎ・UTC日境界
 ├── tools/

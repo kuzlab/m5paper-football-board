@@ -183,6 +183,22 @@ bool parse_standings_cache(const char* json, std::size_t len,
   return !out.empty();
 }
 
+void merge_standings_cache(std::vector<LeagueStandings>& prev,
+                           const std::vector<LeagueStandings>& fresh) {
+  for (const auto& f : fresh) {
+    if (f.comp_index < 0 || f.rows.empty()) continue;
+    bool replaced = false;
+    for (auto& p : prev) {
+      if (p.comp_index == f.comp_index) {
+        p = f;
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) prev.push_back(f);
+  }
+}
+
 std::string serialize_standings_cache(const std::vector<LeagueStandings>& in,
                                       const std::vector<Competition>& comps) {
   JsonDocument doc;
