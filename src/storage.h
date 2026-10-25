@@ -59,8 +59,11 @@ void set_boot_attempts(int n);
 // --- 前回順位表 (§2.5) --------------------------------------------------
 bool load_standings(const std::vector<Competition>& comps,
                     std::vector<LeagueStandings>& out);
-bool save_standings(const std::vector<LeagueStandings>& in,
-                    const std::vector<Competition>& comps);
+// 取得できたリーグだけを差し替えて保存する。取得しなかったリーグの前回順位は
+// そのまま残す。戻り値は保存後にファイルに入っているリーグ数 (失敗なら -1)。
+// 黙って減っていても気づけなかったので、呼び出し側でログに残す。
+int save_standings(const std::vector<LeagueStandings>& in,
+                   const std::vector<Competition>& comps);
 
 // --- 前回描画した画面 (§6.2-1) ------------------------------------------
 // 電源ラッチ方式ではコールドブートなので EPD のフレームバッファが空で

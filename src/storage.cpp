@@ -82,9 +82,18 @@ bool begin_sd() {
   g_sd_ok = false;
   SPI.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
 
-  // 20MHz で駄目なら低速で試す。相性の悪いカードがある。低速でも駄目なら
-  // もう一度だけ初期化し直す (接点が怪しいカードは再初期化で通ることがある)。
-  constexpr std::uint32_t kSpeeds[] = {20000000, 4000000, 4000000};
+  // クロックは 4MHz から始める。
+  //
+  // microSD は IT8951 (EPD) と SPI バスを共有していて配線も長い。20MHz では
+  // 2026-10-25 に `READ_OCR failed` / `crc error` が出ており、通信が化けた
+  // まま FAT やディレクトリのセクタを書くとメタデータが壊れる。実際にこの
+  // カードは新規ファイルを作れなくなった (README の「microSD はマウント
+  // できても使えないことがある」)。
+  //
+  // 代償は小さい。SD から読むのはフォント 204KB と設定・CA だけで、
+  // 1日1回の起床では 0.3秒ほどの差にしかならない。信頼性に振る。
+  // 駄目なら初期化し直し、最後に 1MHz まで落とす。
+  constexpr std::uint32_t kSpeeds[] = {4000000, 4000000, 1000000};
   constexpr int kAttempts = sizeof(kSpeeds) / sizeof(kSpeeds[0]);
 
   for (int i = 0; i < kAttempts; ++i) {
@@ -226,15 +235,18 @@ bool load_standings(const std::vector<Competition>& comps,
   return parse_standings_cache(json.c_str(), json.size(), comps, out);
 }
 
-bool save_standings(const std::vector<LeagueStandings>& in,
-                    const std::vector<Competition>& comps) {
+int save_standings(const std::vector<LeagueStandings>& in,
+                   const std::vector<Competition>& comps) {
   // 取得しなかったリーグの前回順位を落とさないよう、読み込んでから差し替える
   // (merge_standings_cache のコメント参照)。
   std::vector<LeagueStandings> merged;
   load_standings(comps, merged);
   merge_standings_cache(merged, in);
-  return write_file_atomic(kStandingsPath,
-                           serialize_standings_cache(merged, comps));
+  if (!write_file_atomic(kStandingsPath,
+                         serialize_standings_cache(merged, comps))) {
+    return -1;
+  }
+  return static_cast<int>(merged.size());
 }
 
 // --- 前回描画した画面 ---

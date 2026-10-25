@@ -574,7 +574,9 @@ void setup() {
 
   // --- 保存 --------------------------------------------------------------
   if (!standings_now.empty()) {
-    storage::save_standings(standings_now, g_comps);
+    const int kept = storage::save_standings(standings_now, g_comps);
+    LOGI("standings cache: %d leagues kept (%d fetched this run)", kept,
+         (int)standings_now.size());
   }
   seen_log.prune(now, seen_keep_hours);
   storage::save_seen_log(seen_log);
