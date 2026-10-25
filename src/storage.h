@@ -24,8 +24,12 @@ constexpr const char* kLogDir           = "/logs";
 constexpr const char* kFont28Path       = "/fonts/board_28.vlw";
 constexpr const char* kFont20Path       = "/fonts/board_20.vlw";
 
+// マウントしたうえで読み書きの自己診断まで通ったときだけ true。
+// マウントは BPB だけで成功するため、成否だけでは使えるか分からない。
 bool begin_sd();
 bool sd_ready();
+// begin_sd() の結果を1行で。失敗の切り分けに要るので必ずログに残す。
+const char* sd_status();
 
 bool read_file(const char* path, std::string& out, std::size_t max_bytes = 65536);
 bool write_file_atomic(const char* path, const std::string& data);

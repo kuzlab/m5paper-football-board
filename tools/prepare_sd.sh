@@ -47,9 +47,24 @@ cp sd/fonts/board_28.vlw "$DEST/fonts/"
 cp sd/fonts/OFL.txt      "$DEST/fonts/"
 sync
 
+# 必ず読み返して照合する。壊れかけたカードは cp が成功しても読み返しで
+# 内容が一致しない (2026-10-25: マウントは通るのに全ファイルが読めなくなった)。
+fail=0
 echo "配置しました:"
-find "$DEST" -type f -not -name '._*' -not -name '.DS_Store' \
-  | sed "s|^$DEST|  |" | sort
+for f in config.json competitions.json ca.pem \
+         fonts/board_20.vlw fonts/board_28.vlw fonts/OFL.txt; do
+  if cmp -s "sd/$f" "$DEST/$f"; then
+    printf '  ok   %-22s %8d bytes\n' "$f" "$(wc -c <"$DEST/$f")"
+  else
+    printf '  NG   %-22s 読み返しが一致しない\n' "$f"
+    fail=1
+  fi
+done
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "読み返しに失敗した。カードの故障を疑うこと。" >&2
+  exit 1
+fi
 echo
 echo "アンマウントしてから M5Paper に挿してください:"
 echo "  diskutil unmount \"$DEST\""

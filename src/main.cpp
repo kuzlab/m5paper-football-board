@@ -250,6 +250,7 @@ void setup() {
   LOGI("wake reason: %s (AF=%d scheduled=%d control2=%02X)",
        is_auto ? "RTC alarm (auto)" : "button (manual)", (int)wake.alarm_flag,
        (int)wake.schedule_matched, wake.control2);
+  LOGI("sd: %s", storage::sd_status());
   power::log_battery("boot");
   if (now <= 0) {
     // RTC が時刻を失っている = 電池が完全に切れた。アラームも失われている
@@ -264,7 +265,7 @@ void setup() {
   const bool fonts = render::load_fonts();
 
   // --- 設定の読み込み (§7.1) --------------------------------------------
-  if (!sd_ok) fatal_config("SD not mounted");
+  if (!sd_ok) fatal_config(storage::sd_status());
   {
     std::string json;
     std::string err;

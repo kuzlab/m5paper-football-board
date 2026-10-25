@@ -6,6 +6,8 @@
 #include <SD.h>
 #include <SPI.h>
 
+#include <cstdio>
+
 namespace fb {
 namespace storage {
 namespace {
@@ -23,22 +25,96 @@ constexpr int kSdMiso = 13;
 constexpr int kSdMosi = 12;
 constexpr int kSdCs = 4;
 
+// マウント結果の詳細。begin_sd() は log::begin() より前に呼ばれるので、
+// ここに残して呼び出し側に記録させる。
+char g_sd_status[112] = "not initialised";
+
+// マウントできたカードが本当に使えるかを確かめる。
+//
+// f_mount は BPB しか読まないため、root ディレクトリが読めなくてもマウントは
+// 成功する。2026-10-25 の実機では sd=1 のまま config.json も fonts も logs も
+// 全滅した。しかもその少し前から「既存ファイルは読み書きできるが新規作成だけ
+// 失敗する」状態になっており、ログを1行も残せないまま5日間走り続けていた。
+// マウントの成否だけを見ていては気づけない。
+//
+// 読みと書きの両方を試す。新品の空カードでも通るテストにしておく。
+bool self_test() {
+  constexpr const char* kProbe = "/.fbcheck";
+  constexpr const char* kPayload = "fb";
+  if (SD.exists(kProbe)) SD.remove(kProbe);
+  File w = SD.open(kProbe, FILE_WRITE);
+  if (!w) return false;
+  const bool wrote =
+      w.write(reinterpret_cast<const uint8_t*>(kPayload), 2) == 2;
+  w.flush();
+  w.close();
+
+  bool ok = false;
+  if (wrote) {
+    File r = SD.open(kProbe, FILE_READ);
+    if (r) {
+      char got[2] = {0, 0};
+      ok = r.read(reinterpret_cast<uint8_t*>(got), 2) == 2 &&
+           got[0] == kPayload[0] && got[1] == kPayload[1];
+      r.close();
+    }
+  }
+  SD.remove(kProbe);
+  return ok;
+}
+
+const char* card_type_name() {
+  switch (SD.cardType()) {
+    case CARD_MMC:  return "MMC";
+    case CARD_SD:   return "SD";
+    case CARD_SDHC: return "SDHC";
+    case CARD_NONE: return "none";
+    default:        return "unknown";
+  }
+}
+
 }  // namespace
 
 bool sd_ready() { return g_sd_ok; }
+const char* sd_status() { return g_sd_status; }
 
 bool begin_sd() {
+  g_sd_ok = false;
   SPI.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
-  g_sd_ok = SD.begin(kSdCs, SPI, 20000000);
-  if (!g_sd_ok) {
-    // 一度だけ低速で再試行する。相性の悪いカードがある。
-    g_sd_ok = SD.begin(kSdCs, SPI, 4000000);
-  }
-  if (g_sd_ok) {
+
+  // 20MHz で駄目なら低速で試す。相性の悪いカードがある。低速でも駄目なら
+  // もう一度だけ初期化し直す (接点が怪しいカードは再初期化で通ることがある)。
+  constexpr std::uint32_t kSpeeds[] = {20000000, 4000000, 4000000};
+  constexpr int kAttempts = sizeof(kSpeeds) / sizeof(kSpeeds[0]);
+
+  for (int i = 0; i < kAttempts; ++i) {
+    if (i > 0) SD.end();
+    if (!SD.begin(kSdCs, SPI, kSpeeds[i])) {
+      snprintf(g_sd_status, sizeof(g_sd_status),
+               "mount failed (%d/%d at %luMHz)", i + 1, kAttempts,
+               (unsigned long)(kSpeeds[i] / 1000000));
+      continue;
+    }
+    if (!self_test()) {
+      snprintf(g_sd_status, sizeof(g_sd_status),
+               "mounted but unusable (%d/%d at %luMHz): type=%s %luMB",
+               i + 1, kAttempts, (unsigned long)(kSpeeds[i] / 1000000),
+               card_type_name(),
+               (unsigned long)(SD.cardSize() / (1024ULL * 1024ULL)));
+      continue;
+    }
+    g_sd_ok = true;
+    snprintf(g_sd_status, sizeof(g_sd_status),
+             "ok (%d/%d at %luMHz): type=%s %luMB", i + 1, kAttempts,
+             (unsigned long)(kSpeeds[i] / 1000000), card_type_name(),
+             (unsigned long)(SD.cardSize() / (1024ULL * 1024ULL)));
     ensure_dir("/cache");
     ensure_dir(kLogDir);
+    return true;
   }
-  return g_sd_ok;
+
+  SD.end();
+  return false;
 }
 
 bool ensure_dir(const char* path) {
